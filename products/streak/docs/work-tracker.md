@@ -1,5 +1,10 @@
 # Streak work tracker
 
+11 November dedicated repository: extracted the committed Streak baseline and
+required shared tools with relevant history. See [migration details](../../../docs/repository-migration.md).
+Keep uncommitted v5 work local until its own release; repository publication does
+not activate that protocol or change Render hosting.
+
 9 November release checkpoint: bounded three-payment allocation and required
 verification are complete. Owner requested commit and push with hosted CI skipped.
 All 100 required stages have passing evidence across the interrupted major command

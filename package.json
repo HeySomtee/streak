@@ -1,8 +1,8 @@
 {
-  "name": "ckb-learning",
+  "name": "streak-workspace",
   "version": "0.1.0",
   "private": true,
-  "description": "Weekly TypeScript replicas of CKB fundamentals while learning Nervos CKB",
+  "description": "Streak prediction markets, fantasy games and CKB payment infrastructure",
   "scripts": {
     "build": "tsc",
     "postinstall": "npm --prefix products/streak ci",
@@ -18,8 +18,6 @@
     "test:tooling": "node --test scripts/quality/*.test.mjs",
     "format:foundation": "node scripts/quality/format.mjs --write",
     "format:check": "node scripts/quality/format.mjs --check",
-    "week1": "ts-node src/week1/cell-model/demo.ts",
-    "test:week1": "ts-node src/week1/cell-model/demo.ts",
     "test:week14": "npm --prefix products/streak run test:football",
     "test:week15": "npm --prefix products/streak run test:insights",
     "test:week16": "npm --prefix products/streak test",
@@ -34,10 +32,6 @@
     "testnet:week20": "node src/week20/contract-lab/scripts/testnet.cjs",
     "demo:week20": "node src/week20/contract-lab/scripts/serve.cjs",
     "evidence:week20": "node src/week20/contract-lab/scripts/evidence.cjs",
-    "wallet": "ts-node src/week2/wallet/cli.ts",
-    "week3": "ts-node src/week3/nft-faucet/server.ts",
-    "week4": "ts-node src/week4/nft-dao/server.ts",
-    "week5": "ts-node src/week5/scroll/server.ts",
     "streak": "npm --prefix products/streak start",
     "start": "npm run streak"
   },
