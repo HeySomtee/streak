@@ -1,5 +1,13 @@
 # Streak status
 
+17 November queue release published as [21fbbcf](https://github.com/HeySomtee/streak/commit/21fbbcf).
+All 105 local stages passed in one complete run at 12:42 UTC; commit and push reused
+the exact-tree receipt. Independent money/recovery review found no remaining
+concrete blocker. Durable deployment tooling and the verified v5 binary are included.
+See [release evidence and activation](docs/delivery/queue-release-2026-11-17.md).
+Render migration, public activation and physical MetaMask/Zerion acceptance remain
+outstanding. Earlier checkpoints below are historical, not the current release status.
+
 17 November queue release candidate: recovery lock contention is corrected and
 durable v5 deployment tooling is implemented. Focused Chromium/WebKit and all
 eight signed disposable-chain checks pass. The final full release gate remains

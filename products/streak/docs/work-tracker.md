@@ -1,5 +1,21 @@
 # Streak work tracker
 
+17 November publication completed: [21fbbcf](https://github.com/HeySomtee/streak/commit/21fbbcf)
+is on `HeySomtee/streak` main. All 105 required stages passed in one complete run
+at 12:42 UTC, including the corrected cleanup and database-clock fixtures. Commit
+and push reused the successful exact-tree receipt. Independent payment/deployment
+review found no remaining concrete blocker. The owner acceptance checklist was
+excluded from publication; private guidance and messages remain ignored.
+
+Next: reconnect the existing Render service while preserving its disk, database
+and environment; deploy and confirm v5 code using the durable deployment journal;
+activate the two order settings together; create new v5 markets; complete physical
+MetaMask/Zerion rehearsal before announcing Five and Predictions. Do not mix v4
+and v5 fixtures in one campaign slip. Browser automation remains blocked by the
+previous Computer Use URL-verification stop, which must not be bypassed. No public
+activation or fund movement is claimed. [Procedure and evidence](delivery/queue-release-2026-11-17.md).
+The following entries preserve the earlier checkpoints and failed attempts.
+
 17 November test-fixture correction: the next full run exposed a mixed-clock
 competition fixture. The disposable Docker PostgreSQL clock was measured about
 1.1 seconds ahead of Windows, so synthetic chain evidence could predate its

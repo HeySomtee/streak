@@ -1,8 +1,9 @@
 # Streak documentation
 
 17 November [queue release and deployment](delivery/queue-release-2026-11-17.md):
-short recovery locks, durable v5 deployment, packaged pinned code and hosted
-acceptance steps. Public activation remains separate.
+published queue, all 105 local stages passed, short recovery locks, durable v5
+deployment, packaged pinned code and hosted acceptance steps. Public activation
+remains separate.
 
 9 November [sign-once server queue](delivery/signed-payment-queue.md): v5 order
 authorization, multiple pending slips per wallet, durable recovery and local

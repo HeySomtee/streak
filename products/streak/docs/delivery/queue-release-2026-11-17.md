@@ -3,6 +3,28 @@
 17 November 2026. Local release tooling. Public activation and physical-wallet
 acceptance must be recorded separately.
 
+## Verified release
+
+Published as [21fbbcf](https://github.com/HeySomtee/streak/commit/21fbbcf).
+All **105 required local stages** passed in one complete run on 17 November 2026,
+finished at **12:42 UTC**, using Node 24.14.0. Commit and push reused the successful
+receipt for tree `9a393149d539ad5b5198cc24a44001ffae56b4a3`.
+Independent money/recovery review found no remaining concrete blocker.
+
+Coverage includes Chromium/WebKit phone and desktop checkout, isolated PostgreSQL,
+v5 script validation, three simultaneous local-chain payments, sign-once recovery,
+expiry refunds, settlement, claims and durable deployment recovery. The packaged
+47,880-byte protocol matches the rebuilt binary with CKB hash
+`0x9f2de55c41d35ed55a90c858f582a9f662be79fdc6f210699c8c16214541fdb7`.
+These are synthetic local results, not public-chain or physical-wallet acceptance.
+
+Earlier attempts exposed two test-tooling issues: cleanup of an already-removed
+temporary directory and host/database clock skew in synthetic campaign evidence.
+Both were corrected before the successful complete run. No failed gate was bypassed.
+Hosted CI remains paused. Render has not been switched or deployed by this release;
+Computer Use stopped at its browser URL-verification boundary. Public activation
+and the hosted rehearsal below remain outstanding.
+
 ## What ships
 
 The v5 queue lets a wallet sign up to three pending slips. After **Saved for
