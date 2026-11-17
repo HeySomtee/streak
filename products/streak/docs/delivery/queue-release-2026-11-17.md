@@ -57,7 +57,9 @@ The deployment CLI now waits up to 10 seconds for the existing operator lease.
 If it reports busy, keep the lock and retry later. A live process may hold the lock
 for one operation; process uptime is not lock duration. Never stop the signer or
 delete its lock to force deployment. Five isolated CLI/real-lock regressions pass
-and independent review found no blocker; publication of this follow-up is pending.
+and independent review found no blocker. Published as [f822a0a](https://github.com/HeySomtee/streak/commit/f822a0a)
+after all 105 release stages passed at 15:06 UTC. Hosted preparation remains to be
+verified; the reported PID uptime alone does not prove the original error cause.
 
 Run in the service's Shell, where its existing operator environment is available:
 

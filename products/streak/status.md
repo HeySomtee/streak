@@ -1,5 +1,13 @@
 # Streak status
 
+17 November deployment-lock fix published as [f822a0a](https://github.com/HeySomtee/streak/commit/f822a0a).
+All 105 release stages passed in one complete run, finished at 15:06 UTC on Node
+24.14.0. The exact-tree receipt covers `3a87fdfd6d8dc1bb50773e25b4262f62d5c101d7`.
+Five focused CLI/real-lock regressions and independent review also passed. The
+command waits up to 10 seconds and safely reports a busy operator without taking
+over its lock. Render deployment of this fix and public v5 preparation remain
+separate acceptance steps. No production process was stopped or funds moved.
+
 17 November deployment follow-up: hosted prepare returned a generic error; status
 found no v5 record. The binary size matches 47,880 bytes and a current-host
 operator lock belongs to live PID 72. This supports contention, not a proven
