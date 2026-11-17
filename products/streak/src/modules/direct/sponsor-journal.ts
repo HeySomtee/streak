@@ -1,4 +1,14 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync } from 'node:fs';
+import {
+  closeSync,
+  fsyncSync,
+  openSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  statSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import * as ccc from '@ckb-ccc/core';
@@ -116,6 +126,16 @@ export class SponsorJournal {
     const temporary = `${file}.${randomUUID()}.next`;
     writeExclusiveJson(temporary, entry);
     renameSync(temporary, file);
+    // Match order-store durability: flush the renamed receipt on the hosted Linux disk.
+    // Windows does not support opening directory descriptors for fsync.
+    if (process.platform !== 'win32') {
+      const directory = openSync(this.directory, 'r');
+      try {
+        fsyncSync(directory);
+      } finally {
+        closeSync(directory);
+      }
+    }
     this.load(entry.offer.offerId);
   }
   active(now: number): SponsorEntry[] {

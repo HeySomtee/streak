@@ -263,7 +263,8 @@ export class BatchService extends SponsorService {
     const request = parseBatchRequest(value),
       digest = `0x${createHash('sha256').update(JSON.stringify(request)).digest('hex')}`;
     return this.options.journal.exclusive(async () => {
-      const prior = this.store.all().find((entry) => entry.requestId === request.requestId);
+      const history = this.store.all();
+      const prior = history.find((entry) => entry.requestId === request.requestId);
       if (prior) {
         if (prior.requestDigest !== digest) throw Error('Request identity belongs to another slip');
         return atomicOffer(prior.offer);
@@ -647,10 +648,22 @@ export class BatchService extends SponsorService {
           this.options.client,
         );
         while (prepared.witnesses.length < prepared.inputs.length) prepared.witnesses.push('0x');
-        const fee = prepared.estimateFee(1000n);
+        let fee = prepared.estimateFee(1000n);
         if (fee > 10_000_000n || prepared.toBytes().length > 100_000)
           throw Error('Atomic payment fee or size exceeds its reviewed bound');
         prepared.outputs[ownerChangeOutputIndex].capacity -= fee;
+        // A new review must not reuse a retired signature's browser journal identity.
+        // Quote the smallest fee adjustment before review; never modify signed bytes.
+        const previousHashes = new Set(history.map((entry) => entry.offer.rawHash));
+        while (previousHashes.has(prepared.hash())) {
+          fee += 1n;
+          prepared.outputs[ownerChangeOutputIndex].capacity -= 1n;
+          if (
+            fee > 10_000_000n ||
+            prepared.outputs[ownerChangeOutputIndex].capacity < minChange(owner)
+          )
+            throw Error('A fresh payment review exceeds its fee or change bound');
+        }
         for (const line of lines)
           if (line.mode === 'create') line.descriptor.creationTxHash = prepared.hash();
         const offer: BatchOffer = {

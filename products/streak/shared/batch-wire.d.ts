@@ -109,12 +109,16 @@ export interface BatchStatus {
   offer: BatchOffer;
   state: BatchState;
   signedBytes?: string;
+  /** Exact owner signature is durable on the server, not necessarily broadcast. */
+  ownerSignatureAccepted?: true;
   transactionHash: string;
   message?: string;
   /** A discovery hint only. The browser independently verifies its canonical input conflict. */
   conflictHash?: string;
   /** Private operator confirms cancellation without an accepted owner or sponsor signature. */
   unsignedCancellation?: true;
+  /** All current aliases were checked and cancelled under the operator lease without signatures. */
+  unsignedRejection?: true;
 }
 export interface BatchIdentity {
   offerId: string;
@@ -130,6 +134,7 @@ export interface BatchTransport {
   submit(request: BatchSubmit): Promise<BatchStatus>;
   status(identity: BatchIdentity): Promise<BatchStatus>;
   resume(identity: BatchIdentity): Promise<BatchStatus>;
+  reject?(identity: BatchIdentity): Promise<BatchStatus>;
   resolve(request: BatchIdentity & { conflictingTxHash: string }): Promise<BatchStatus>;
 }
 export interface BatchWaiting {

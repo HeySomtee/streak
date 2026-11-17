@@ -21,6 +21,7 @@ import {
   SponsorJournal,
   sponsorId,
   canonicalSponsorConflicts,
+  sponsorStores,
   type SponsorEntry,
 } from './sponsor-journal';
 
@@ -70,11 +71,15 @@ export interface SponsorStatus {
   offer: SponsorOffer;
   state: SponsorState;
   signedBytes?: string;
+  /** The exact owner signature is saved in the operator journal. Not chain confirmation. */
+  ownerSignatureAccepted?: true;
   transactionHash: string;
   message?: string;
   conflictHash?: string;
   /** Cancelled before either signature was ever accepted into the immutable journal. */
   unsignedCancellation?: true;
+  /** All current aliases were checked and cancelled under the operator lease without signatures. */
+  unsignedRejection?: true;
 }
 export interface SponsorOfferRequest {
   fixtureId: string;
@@ -694,11 +699,12 @@ export class SponsorService {
     if (tx.outputs[5].capacity < minChange(sponsor) || tx.outputs[6].capacity < minChange(owner))
       throw Error('Sponsored change cannot occupy its cell');
   }
-  async submit(value: SponsorSubmitRequest): Promise<SponsorStatus> {
+  async submit(value: SponsorSubmitRequest, acceptanceOnly = false): Promise<SponsorStatus> {
     return this.options.journal.exclusive(async () => {
       const entry = this.load(value);
       if (entry.userSignedBytes && entry.userSignedBytes !== value.userSignedBytes)
         throw Error('Another owner signature is already recorded for this offer');
+      if (acceptanceOnly && entry.userSignedBytes) return this.public(entry);
       if (entry.signedBytes) return this.reconcile(entry);
       if (entry.state === 'cancelled')
         throw Error('This proposal was invalidated by a canonical conflicting spend');
@@ -711,12 +717,25 @@ export class SponsorService {
       await this.validateFrozen(entry.offer);
       await verifySponsorOwnerWitness(this.options.client, entry.offer, value.userSignedBytes);
       if (!entry.userSignedBytes) {
+        // Validation can involve slow RPC reads. Expiry still applies at acceptance.
+        if (this.now() >= entry.offer.expiresAt)
+          throw Error('Unsigned sponsor offer expired. Its signature was not accepted.');
         entry.userSignedBytes = value.userSignedBytes;
         entry.state = 'owner-signed';
         this.store.save(entry);
       }
-      return this.finish(entry);
+      return acceptanceOnly ? this.public(entry) : this.finish(entry);
     });
+  }
+  /** Read the atomically replaced receipt without taking the spending lease or doing RPC.
+   * This snapshot reports acceptance only; it never releases inputs or proves settlement. */
+  receipt(value: { offerId: string; rawHash: string }): SponsorStatus {
+    const entry = this.store.load(sponsorId(value.offerId));
+    if (!entry || entry.offer.rawHash !== hash32(value.rawHash, 'transaction hash'))
+      throw Error('Saved sponsor offer not found');
+    if (entry.state === 'offered' && !entry.userSignedBytes && this.now() >= entry.offer.expiresAt)
+      return this.public({ ...entry, state: 'expired' });
+    return this.public(entry);
   }
   protected async finish(entry: SponsorEntry): Promise<SponsorStatus> {
     if (!entry.userSignedBytes) throw Error('Owner signature is required');
@@ -798,6 +817,7 @@ export class SponsorService {
       state: entry.state,
       transactionHash: entry.offer.rawHash,
       ...(entry.signedBytes ? { signedBytes: entry.signedBytes } : {}),
+      ...(entry.userSignedBytes ? { ownerSignatureAccepted: true as const } : {}),
       ...(entry.state === 'cancelled' && !entry.userSignedBytes && !entry.signedBytes
         ? { unsignedCancellation: true as const }
         : {}),
@@ -806,6 +826,40 @@ export class SponsorService {
         : {}),
       ...(message ? { message } : {}),
     };
+  }
+  /** Only retire unaccepted atomic reviews. Never co-sign, resume or broadcast here. */
+  async rejectUnsigned(value: { offerId: string; rawHash: string }): Promise<SponsorStatus> {
+    return this.options.journal.exclusive(async () => {
+      let entry = this.load(value);
+      if (
+        entry.offer.version === 'atomic-predictions-v1' &&
+        !entry.userSignedBytes &&
+        !entry.signedBytes &&
+        (entry.state === 'cancelled' || this.now() >= entry.offer.expiresAt)
+      ) {
+        // An earlier retry can have another offer ID with identical raw bytes.
+        // Check every alias and its funding journal before proving non-acceptance.
+        const aliases = sponsorStores(this.options.journal.directory).flatMap((store) =>
+          store
+            .all()
+            .filter((row) => row.offer.rawHash === entry.offer.rawHash)
+            .map((row) => ({ store, row })),
+        );
+        if (
+          aliases.some(
+            ({ row }) => row.userSignedBytes || row.signedBytes || this.operationFor(row.offer),
+          )
+        )
+          return this.public(entry, 'Another saved offer for this transaction remains reserved.');
+        for (const { store, row } of aliases) {
+          row.state = 'cancelled';
+          store.save(row);
+        }
+        entry = this.load(value);
+        return { ...this.public(entry), unsignedRejection: true };
+      }
+      return this.public(entry);
+    });
   }
   async status(
     value: { offerId: string; rawHash: string },

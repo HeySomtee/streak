@@ -248,9 +248,26 @@ export async function parseBatchStatus(value: unknown): Promise<BatchStatus> {
       row.signedBytes !== undefined)
   )
     throw Error('Unsigned cancellation status could not be verified.');
+  if (
+    row.ownerSignatureAccepted !== undefined &&
+    (row.ownerSignatureAccepted !== true ||
+      ['offered', 'expired'].includes(String(row.state)) ||
+      row.unsignedCancellation)
+  )
+    throw Error('Payment acceptance receipt could not be verified.');
+  if (
+    row.unsignedRejection !== undefined &&
+    (row.unsignedRejection !== true ||
+      row.unsignedCancellation !== true ||
+      row.ownerSignatureAccepted ||
+      row.signedBytes)
+  )
+    throw Error('Unsigned rejection could not be verified.');
   return freeze({
     offer,
     state: row.state as BatchStatus['state'],
+    ...(row.unsignedRejection === true ? { unsignedRejection: true as const } : {}),
+    ...(row.ownerSignatureAccepted === true ? { ownerSignatureAccepted: true as const } : {}),
     transactionHash: offer.rawHash,
     ...(row.signedBytes === undefined ? {} : { signedBytes: transactionBytes(row.signedBytes) }),
     ...(row.message === undefined ? {} : { message: text(row.message, 400) }),

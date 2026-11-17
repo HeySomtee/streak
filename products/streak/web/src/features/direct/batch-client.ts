@@ -58,7 +58,8 @@ export type BatchRecovery = Readonly<{
     | 'conflict'
     | 'reorg'
     | 'resolved'
-    | 'discarded';
+    | 'discarded'
+    | 'rejected';
   confirmations: number;
   inputsLive: boolean | null;
   message: string;
@@ -122,6 +123,7 @@ export class BatchClient {
   private readonly lock: NonNullable<BatchOptions['exclusive']>;
   private unsignedReview?: BatchReview;
   private unsignedOffer?: { offerId: string; rawHash: string; requestId: string };
+  private readonly deliveryRetries = new Map<string, { at: number; attempts: number }>();
   private readonly conflictLookups = new Map<string, { until: number; hash?: string }>();
   constructor(
     signer: ccc.Signer,
@@ -667,12 +669,31 @@ export class BatchClient {
     const identity = await this.identity();
     return this.lock(`streak-direct:${identity.ownerHash}`, async () => {
       let record = await this.saved(raw);
+      // Deliver the already approved immutable bytes before any chain recovery.
+      // A slow/unavailable public RPC must not prevent the server receiving them.
+      if (
+        !record.finalSignedBytes &&
+        !record.conflictProof &&
+        !['discarded', 'rejected'].includes(record.status)
+      ) {
+        if (!record.submissionAttemptedAt && this.now() >= record.offer.expiresAt)
+          throw Error(
+            'This signature was never shared and its offer expired. Discard the unshared signature before preparing a fresh review.',
+          );
+        return this.deliver(record);
+      }
       const previous = await this.recoverUnlocked(record);
       record = previous.record;
       if (
-        ['submitted', 'committed', 'confirmed', 'conflict', 'resolved', 'discarded'].includes(
-          previous.status,
-        ) ||
+        [
+          'submitted',
+          'committed',
+          'confirmed',
+          'conflict',
+          'resolved',
+          'discarded',
+          'rejected',
+        ].includes(previous.status) ||
         previous.inputsLive === false
       )
         return previous;
@@ -717,6 +738,137 @@ export class BatchClient {
       return this.recoverUnlocked(record);
     });
   }
+  private deliveryState(record: BatchRecord): BatchRecovery {
+    if (record.status === 'rejected')
+      return {
+        record,
+        status: 'rejected',
+        confirmations: 0,
+        inputsLive: null,
+        message:
+          'This payment was not accepted. Your picks are saved and available for a fresh review.',
+      };
+    return {
+      record,
+      status: 'awaiting-sponsor',
+      confirmations: 0,
+      inputsLive: null,
+      message: record.serverAccepted
+        ? 'Payment saved for processing. You can leave the app; Streak will continue automatically.'
+        : 'Your signature is saved on this device. Keep Streak open while we retry delivery. No new wallet approval is needed.',
+    };
+  }
+  private async deliver(record: BatchRecord): Promise<BatchRecovery> {
+    // The authorization is already frozen. Only overlapping local reservations need
+    // proof here; unrelated historical payments must not delay signature delivery.
+    const reservations = [
+      ...(await this.journal.list(record.scope)).map(parseReservation),
+      ...((await this.journal.otherReservations?.(record.scope)) ?? []),
+    ];
+    const inputs = new Set(record.inputs.map(pointKey));
+    for (const other of reservations)
+      if (
+        other.hash !== record.hash &&
+        other.inputs.some((point) => inputs.has(pointKey(point))) &&
+        !(await reservationReleased(this.signer.client, other))
+      )
+        throw Error('Another unresolved signed transaction reserves an input.');
+    record = {
+      ...record,
+      status: 'submitting',
+      submissionAttemptedAt: record.submissionAttemptedAt ?? this.now(),
+    };
+    await this.journal.put(record);
+    const previous = this.deliveryRetries.get(record.hash);
+    if (this.deliveryRetries.size >= 32)
+      this.deliveryRetries.delete(this.deliveryRetries.keys().next().value!);
+    const attempts = (previous?.attempts ?? 0) + 1;
+    this.deliveryRetries.set(record.hash, {
+      attempts,
+      at: this.now() + Math.min(60_000, 5_000 * 2 ** Math.min(attempts - 1, 4)),
+    });
+    try {
+      record = await this.acceptStatus(
+        record,
+        await parseBatchStatus(
+          await this.transport.submit({
+            offerId: record.offer.offerId,
+            rawHash: record.hash,
+            userSignedBytes: record.ownerSignedBytes,
+          }),
+        ),
+      );
+    } catch {
+      record = { ...record, status: 'unknown' };
+      await this.journal.put(record);
+      return this.deliveryState(record);
+    }
+    if (record.serverAccepted) this.deliveryRetries.delete(record.hash);
+    // A receipt is useful immediately, without waiting for co-signing or chain RPC.
+    if (!record.finalSignedBytes) return this.deliveryState(record);
+    return this.recoverUnlocked(record);
+  }
+  /** Visible signed-in monitors retry only the exact saved authorization, never sign again. */
+  async monitor(raw: BatchRecord): Promise<BatchRecovery> {
+    const identity = await this.identity();
+    return this.lock(`streak-direct:${identity.ownerHash}`, async () => {
+      let record = await this.saved(raw);
+      if (
+        !record.serverAccepted &&
+        !record.finalSignedBytes &&
+        !record.conflictProof &&
+        !['discarded', 'rejected'].includes(record.status)
+      ) {
+        let rejected = false;
+        try {
+          const receipt = await parseBatchStatus(
+            await this.transport.status({ offerId: record.offer.offerId, rawHash: record.hash }),
+          );
+          record = await this.acceptStatus(record, receipt);
+          rejected =
+            ['expired', 'cancelled'].includes(receipt.state) && !receipt.ownerSignatureAccepted;
+          if (
+            rejected &&
+            !record.serverAccepted &&
+            !record.finalSignedBytes &&
+            this.transport.reject
+          ) {
+            const refusal = await parseBatchStatus(
+              await this.transport.reject({ offerId: record.offer.offerId, rawHash: record.hash }),
+            );
+            record = await this.acceptStatus(record, refusal);
+            if (refusal.unsignedRejection && !record.serverAccepted && !record.finalSignedBytes) {
+              record = {
+                ...record,
+                status: 'rejected',
+                serverRejectedAt: record.serverRejectedAt ?? this.now(),
+              };
+              await this.journal.put(record);
+              return {
+                record,
+                status: 'rejected',
+                confirmations: 0,
+                inputsLive: null,
+                message:
+                  'This payment was not accepted and was not sent. Your picks are saved. Review them to try again.',
+              };
+            }
+          }
+        } catch {
+          // Delivery is idempotent; a missing receipt is not evidence of rejection.
+        }
+        if (
+          !rejected &&
+          !record.serverAccepted &&
+          !record.finalSignedBytes &&
+          (record.submissionAttemptedAt || this.now() < record.offer.expiresAt) &&
+          this.now() >= (this.deliveryRetries.get(record.hash)?.at ?? 0)
+        )
+          return this.deliver(record);
+      }
+      return this.recoverUnlocked(record);
+    });
+  }
   private async acceptStatus(
     record: BatchRecord,
     status: Awaited<ReturnType<BatchTransport['status']>>,
@@ -736,8 +888,16 @@ export class BatchClient {
       record = Object.freeze({
         ...record,
         finalSignedBytes: status.signedBytes,
-        status: 'submitted',
+        status: 'unknown',
       });
+      await this.journal.put(record);
+    }
+    if (status.ownerSignatureAccepted || status.signedBytes) {
+      record = {
+        ...record,
+        serverAccepted: true,
+        submissionAttemptedAt: record.submissionAttemptedAt ?? this.now(),
+      };
       await this.journal.put(record);
     }
     return record;
@@ -806,19 +966,45 @@ export class BatchClient {
         message:
           'This expired signature was never shared and was explicitly discarded. Its audit record remains saved.',
       };
-    const client = this.signer.client,
+    const client = this.signer.client;
+    let response;
+    try {
       response = await client.getTransactionNoCache(record.hash);
+    } catch {
+      // The delivery receipt survives an independent public-node outage.
+      if (record.status === 'rejected') return this.deliveryState(record);
+      return {
+        ...this.deliveryState(record),
+        status: record.finalSignedBytes ? 'unknown' : 'awaiting-sponsor',
+        message: record.serverAccepted
+          ? 'Payment saved on Streak. Chain confirmation is temporarily unavailable; processing continues automatically.'
+          : 'Your payment is saved on this device. Reconnecting to check delivery and confirmation.',
+      };
+    }
     if (response && response.transaction.hash() !== record.hash)
       throw Error('RPC transaction identity mismatch.');
-    let status: BatchRecovery['status'] = record.finalSignedBytes ? 'unknown' : 'awaiting-sponsor';
+    let status: BatchRecovery['status'] =
+      record.status === 'rejected'
+        ? 'rejected'
+        : record.finalSignedBytes
+          ? 'unknown'
+          : 'awaiting-sponsor';
     let confirmations = 0,
       inputsLive: boolean | null = null;
     let message =
       'Your signed prediction is saved. Resume this exact transaction; do not start another payment.';
-    const originalHeader =
-      response?.status === 'committed' && response.blockNumber !== undefined && response.blockHash
-        ? await client.getHeaderByNumberNoCache(response.blockNumber)
-        : undefined;
+    let originalHeader;
+    try {
+      originalHeader =
+        response?.status === 'committed' && response.blockNumber !== undefined && response.blockHash
+          ? await client.getHeaderByNumberNoCache(response.blockNumber)
+          : undefined;
+    } catch {
+      return {
+        ...this.deliveryState(record),
+        message: 'Your payment is saved. Reconnecting to verify chain confirmation.',
+      };
+    }
     const canonicalOriginal = !!originalHeader && originalHeader.hash === response?.blockHash;
     if (record.conflictProof && !canonicalOriginal) {
       const proof = await canonicalConflict(client, record, record.conflictProof.hash);
@@ -861,8 +1047,21 @@ export class BatchClient {
         response.blockHash &&
         response.blockNumber !== undefined
       ) {
-        const header = await client.getHeaderByNumberNoCache(response.blockNumber),
+        const header = originalHeader;
+        let tip;
+        try {
           tip = await client.getTipHeader();
+        } catch {
+          record = { ...record, status: 'submitted' };
+          await this.journal.put(record);
+          return {
+            record,
+            status: 'submitted',
+            confirmations: 0,
+            inputsLive: null,
+            message: 'Your payment is on the network. Reconnecting to verify its confirmations.',
+          };
+        }
         if (header?.hash === response.blockHash && tip.number >= response.blockNumber) {
           confirmations = Number(tip.number - response.blockNumber + 1n);
           status = confirmations >= 3 ? 'confirmed' : 'committed';
@@ -881,12 +1080,18 @@ export class BatchClient {
           message = 'This confirmation is no longer canonical. Recover the same transaction.';
         }
       }
+    } else if (status === 'rejected') {
+      return this.deliveryState(record);
     } else {
       try {
         const sponsorStatus = await parseBatchStatus(
           await this.transport.status({ offerId: record.offer.offerId, rawHash: record.hash }),
         );
         record = await this.acceptStatus(record, sponsorStatus);
+        if (record.serverAccepted) message = this.deliveryState(record).message;
+        else if (['expired', 'cancelled'].includes(sponsorStatus.state))
+          message =
+            'This review ended before Streak accepted the payment. Your picks are saved; checking the original inputs before releasing the record.';
         // The operator may have already found the spend. Its hash is only a hint:
         // independently prove exact shared input, canonical block and four confirmations.
         const conflictHint =
@@ -902,8 +1107,9 @@ export class BatchClient {
           }
         }
       } catch {
-        message =
-          'Sponsorship status is unavailable. Your exact signed prediction remains saved and its inputs stay reserved.';
+        message = record.serverAccepted
+          ? 'Payment saved on Streak. Status is reconnecting; processing continues automatically.'
+          : 'Your signature is saved on this device. Keep Streak open while we reconnect and retry delivery.';
       }
       if (record.blockHash) {
         status = 'reorg';
@@ -912,12 +1118,19 @@ export class BatchClient {
       } else if (record.finalSignedBytes) status = 'unknown';
     }
     if (!['submitted', 'committed', 'confirmed'].includes(status)) {
-      inputsLive = (
-        await Promise.all(
-          record.inputs.map((input) => client.getCellLiveNoCache(input, true, true)),
-        )
-      ).every(Boolean);
-      if (!inputsLive && status !== 'reorg') {
+      try {
+        inputsLive = (
+          await Promise.all(
+            record.inputs.map((input) => client.getCellLiveNoCache(input, true, true)),
+          )
+        ).every(Boolean);
+      } catch {
+        inputsLive = null;
+        message = record.serverAccepted
+          ? 'Payment saved on Streak. Chain checks are reconnecting; processing continues automatically.'
+          : 'Your signed payment is saved. We are reconnecting to verify its original inputs.';
+      }
+      if (inputsLive === false && status !== 'reorg') {
         status = 'conflict';
         message =
           'We could not confirm this payment yet. We are checking a possible conflicting transaction. Your saved payment is protected; do not pay for these picks again until it is resolved.';

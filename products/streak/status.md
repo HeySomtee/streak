@@ -1,5 +1,17 @@
 # Streak status
 
+17 November payment handoff correction implemented locally: saved server acceptance,
+automatic delivery recovery and safe expiry retirement replace stranded pre-broadcast
+states. Focused tests and independent review pass; complete release verification,
+publication and hosted wallet checks remain pending. See the
+[delivery record](docs/delivery/payment-handoff-2026-11-17.md).
+
+17 November hosted 502 correction: local authenticated sponsor readiness replaces
+RPC-dependent configuration polling. Focused lifecycle and stalled-request tests
+pass; independent review found no blocker. Full gate and publication remain pending.
+Live v5 configuration is enabled, but queued-market and physical-wallet acceptance
+remain outstanding. See the work tracker for observed Render failure evidence.
+
 17 November deployment-lock fix published as [f822a0a](https://github.com/HeySomtee/streak/commit/f822a0a).
 All 105 release stages passed in one complete run, finished at 15:06 UTC on Node
 24.14.0. The exact-tree receipt covers `3a87fdfd6d8dc1bb50773e25b4262f62d5c101d7`.

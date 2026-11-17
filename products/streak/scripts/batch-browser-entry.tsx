@@ -96,6 +96,23 @@ export async function crossStore(record: Awaited<ReturnType<IndexedBatchJournal[
   ]);
   return result.map((entry) => (entry.status === 'rejected' ? String(entry.reason) : entry.value));
 }
+export async function rejectedReservation(
+  record: Awaited<ReturnType<IndexedBatchJournal['list']>>[number],
+) {
+  const journal = new IndexedBatchJournal();
+  await journal.put(record);
+  const blocked = await crossStore(record);
+  let invalid = '';
+  try {
+    await journal.put({ ...record, status: 'rejected' });
+  } catch (error) {
+    invalid = String(error);
+  }
+  await journal.put({ ...record, status: 'rejected', serverRejectedAt: Date.now() });
+  const released = await crossStore(record);
+  const retained = (await journal.list(record.scope))[0];
+  return { blocked: blocked[0], invalid, released: released[0] === undefined, retained };
+}
 function Harness() {
   const account = useQuery({ queryKey: ['account'], queryFn: ({ signal }) => getAccount(signal) });
   const [open, setOpen] = useState(false);

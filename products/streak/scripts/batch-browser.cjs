@@ -123,6 +123,7 @@ async function main() {
         let signCalls = 0,
           rejectNext = true,
           posts = 0,
+          allowAutomaticRetry = false,
           offers = 0,
           holdDemand;
         const account = {
@@ -204,6 +205,10 @@ async function main() {
             assert.equal(saved.length, 1);
             assert.ok(saved[0].submissionAttemptedAt);
             assert.equal(saved[0].ownerSignedBytes, request.userSignedBytes);
+            assert.equal(saved[0].offer.offerId, request.offerId);
+            assert.equal(saved[0].hash, request.rawHash);
+            if (posts > 1 && !allowAutomaticRetry)
+              return json({ error: 'Synthetic temporary delivery outage' }, 503);
             try {
               return json(await chain.submit(request));
             } catch (error) {
@@ -461,7 +466,10 @@ async function main() {
         await tracker.getByRole('article', { name: 'Combined prediction payment' }).waitFor();
         await lostSubmission;
         await tracker.getByText('Checking your payment', { exact: true }).waitFor();
-        assert.equal(posts, 1);
+        assert.ok(
+          posts >= 1,
+          'the initial delivery occurred; background retries may already have begun',
+        );
         assert.equal(signCalls, 2);
         const saved = await page.evaluate(
           async (scope) => (await import('/batch.js')).saved(scope),
@@ -493,11 +501,16 @@ async function main() {
         await tracker.waitFor();
         await tracker.locator('.payment-progress-toggle').click();
         await tracker.getByRole('button', { name: 'Resume payment', exact: true }).waitFor();
+        assert.equal(
+          await tracker.getByRole('link', { name: /View transaction/ }).count(),
+          0,
+          'an unbroadcast hash has no explorer link',
+        );
         await page.evaluate(async () => (await import('/batch.js')).changeStake(1, '175'));
-        await tracker.getByRole('button', { name: 'Resume payment', exact: true }).click();
+        allowAutomaticRetry = true;
         await tracker.getByText('Confirmed', { exact: true }).waitFor();
         assert.equal(signCalls, 2);
-        assert.equal(posts, 2);
+        assert.ok(posts >= 2, 'delivery recovered automatically without clicking Resume');
         assert.equal(chain.submissions[0].userSignedBytes, chain.submissions[1].userSignedBytes);
         const final = await page.evaluate(
           async (scope) => (await import('/batch.js')).saved(scope),
@@ -537,6 +550,29 @@ async function main() {
         });
         await page.screenshot({ path: path.join(evidence, `${name}-${width}-recovered.png`) });
         await context.close();
+        const storageContext = await browser.newContext({ serviceWorkers: 'block' });
+        const storagePage = await storageContext.newPage();
+        page = storagePage;
+        phase = `${name} ${width} rejected IndexedDB reservation`;
+        await storagePage.route('**/api/me', (route) =>
+          route.fulfill({ status: 401, contentType: 'application/json', body: '{}' }),
+        );
+        await storagePage.goto(`http://127.0.0.1:${server.address().port}/seed`);
+        const storage = await storagePage.evaluate(
+          async (record) => (await import('/batch.js')).rejectedReservation(record),
+          saved[0],
+        );
+        assert.match(storage.blocked, /already reserves an input/);
+        assert.match(storage.invalid, /Invalid server-rejected/);
+        assert.equal(
+          storage.released,
+          true,
+          'validated rejection releases cross-store input reservation',
+        );
+        assert.equal(storage.retained.ownerSignedBytes, saved[0].ownerSignedBytes);
+        assert.equal(storage.retained.submissionAttemptedAt, saved[0].submissionAttemptedAt);
+        assert.equal(storage.retained.status, 'rejected');
+        await storageContext.close();
         console.log(`${name} ${width}: combined slip and exact recovery passed`);
       }
       await browser.close();

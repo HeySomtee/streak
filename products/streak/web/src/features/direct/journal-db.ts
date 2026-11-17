@@ -112,6 +112,7 @@ export async function putStored(
                 if (row.hash === checked.hash) continue;
                 if (row.status === 'discarded' && parseReservation(row).discardedUnsubmitted)
                   continue;
+                if (row.status === 'rejected' && parseReservation(row).rejectedUnsigned) continue;
                 // Every caller revalidates canonical conflict evidence before signing.
                 if (row.status === 'resolved' && row.conflictProof) continue;
                 if (!Array.isArray(row.inputs))

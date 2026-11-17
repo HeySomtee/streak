@@ -96,7 +96,7 @@ async function main(): Promise<void> {
         (await fetch(`${base}/api/direct/batch/demand?matchId=../../secret`)).status,
         400,
       );
-      for (const action of ['offer', 'submit', 'resume', 'resolve'])
+      for (const action of ['offer', 'submit', 'resume', 'resolve', 'reject'])
         assert.equal(
           (
             await fetch(`${base}/api/direct/batch/${action}`, {

@@ -1,5 +1,40 @@
 # Streak work tracker
 
+17 November signed-payment handoff is implemented locally. Durable owner acceptance,
+fast receipt reads, automatic exact-byte delivery retry, safe unaccepted-payment
+retirement and fresh-review hash isolation are covered by focused client/backend
+checks and independent recovery review. The [delivery record](delivery/payment-handoff-2026-11-17.md)
+explains boundaries. Final integrated browser and full release gates remain pending;
+no publication or hosted-wallet acceptance is claimed. The private reported payment
+receipt remains uninspected. Restore the owner's backed-up acceptance checklist
+before handoff; preserve all earlier commitments below.
+
+17 November 502 investigation: public Season and order configuration returned HTTP
+200, enabled v5 with no queued markets. Render deployment dep-dbu7mmjl550s73a654pg
+is Live. Logs show sponsor readiness timed out at 17:09:51 Lagos, followed by
+successful readiness at 17:10:14. Later memory was about 354 MiB with a 432 MiB
+peak under the 512 MiB limit; this does not establish OOM as the outage cause.
+The startup probe used batch configuration, which can read canonical conflicts
+from RPC. Its two-second HTTP deadline does not cancel that server work. Repeated
+probes can occupy all four request slots. A new authenticated local health endpoint
+avoids those reads and the payment request cap. Canonical deployment verification
+still precedes listen; payment and recovery checks are unchanged. All 15 host
+regressions and the isolated batch suite pass, including four stalled configuration
+requests and independent health responses. Independent review found no blocker.
+Full release verification and publication remain pending. Slow pre-listen RPC
+verification can still exceed the unchanged 120-second startup budget.
+The owner has confirmed deployment of v5 and its two settings. Public code hash
+0xb940d4ebd6b3512b29f1c95527c7ea7a02193de2d151d58badfcc9509c856974 was confirmed
+before activation. New queued-market creation and physical-wallet acceptance remain
+outstanding. Preserve the owner checklist; no fund movement by this agent.
+
+17 November hosted follow-up verified: Render marks commit `930c413` Live on
+the existing service, deployment `dep-dbu6s167bikc739p790g`. It includes deployment
+lock fix `f822a0a`. The owner checklist was restored byte-for-byte and the owned
+disposable test database was stopped. Next is one hosted `direct-deploy-order.cjs
+prepare` retry and review of its output before any broadcast. No public deployment
+transaction was signed or sent by this agent. This note is a local handoff.
+
 17 November deployment-lock fix published as [f822a0a](https://github.com/HeySomtee/streak/commit/f822a0a).
 All 105 release stages passed in one complete run, finished at 15:06 UTC on Node
 24.14.0. The exact-tree receipt covers `3a87fdfd6d8dc1bb50773e25b4262f62d5c101d7`.

@@ -1,5 +1,8 @@
 # Streak documentation
 
+17 November [payment handoff and recovery](delivery/payment-handoff-2026-11-17.md):
+durable server receipts, automatic exact-byte delivery and safe expiry retirement.
+
 17 November [queue release and deployment](delivery/queue-release-2026-11-17.md):
 published queue, all 105 local stages passed, short recovery locks, durable v5
 deployment, packaged pinned code and hosted acceptance steps. Public activation

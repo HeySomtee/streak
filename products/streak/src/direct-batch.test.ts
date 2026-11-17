@@ -269,6 +269,74 @@ async function main() {
     assert.equal(broadcasts, 0);
     console.log('PASS bounded fixture reads preserve order and drain failures before mutation');
 
+    let validationBoundary = false,
+      boundaryExpiry = 0;
+    const rejectionService = new BatchService({
+      ...options,
+      registry: new DirectRegistry(join(directory, 'rejection-registry'), config),
+      journal: new OperatorJournal(join(directory, 'rejection-operator'), config),
+      fixture: async (id) => {
+        const match = await fixture(id);
+        if (validationBoundary) now = boundaryExpiry;
+        return match;
+      },
+    });
+    const rejectedOffer = await rejectionService.prepareOffer({
+      ...request,
+      requestId: randomUUID(),
+    });
+    boundaryExpiry = rejectedOffer.expiresAt;
+    const rejectedPartial = await owner.signOnlyTransaction(
+      ccc.Transaction.fromBytes(rejectedOffer.unsignedBytes),
+    );
+    validationBoundary = true;
+    await assert.rejects(
+      rejectionService.submit(
+        {
+          offerId: rejectedOffer.offerId,
+          rawHash: rejectedOffer.rawHash,
+          userSignedBytes: rejectedPartial.toHex(),
+        },
+        true,
+      ),
+      /offer expired/,
+    );
+    assert.equal(
+      rejectionService.store.load(rejectedOffer.offerId)?.userSignedBytes,
+      undefined,
+      'expiry during validation does not accept a late signature',
+    );
+    const alias = structuredClone(rejectionService.store.load(rejectedOffer.offerId)!);
+    alias.offer.offerId = randomUUID();
+    alias.requestId = randomUUID();
+    rejectionService.store.save(alias);
+    const refusal = await rejectionService.rejectUnsigned({
+      offerId: rejectedOffer.offerId,
+      rawHash: rejectedOffer.rawHash,
+    });
+    assert.equal(refusal.unsignedRejection, true);
+    assert.equal(refusal.unsignedCancellation, true);
+    assert.equal(
+      rejectionService.store.load(alias.offer.offerId)?.state,
+      'cancelled',
+      'all unsigned aliases are permanently cancelled together',
+    );
+    await assert.rejects(
+      rejectionService.submit(
+        {
+          offerId: alias.offer.offerId,
+          rawHash: alias.offer.rawHash,
+          userSignedBytes: rejectedPartial.toHex(),
+        },
+        true,
+      ),
+      /invalidated/,
+    );
+    now = NOW;
+    console.log(
+      'PASS validation-time expiry is rejected and all unsigned duplicate identities cancel under the same lease',
+    );
+
     const current = await service.prepareOffer({ ...request, requestId: randomUUID() }),
       template = ccc.Transaction.fromBytes(current.unsignedBytes),
       changed = template.clone();
@@ -288,11 +356,61 @@ async function main() {
       /Invalid owner transaction signature/,
     );
     assert.equal(broadcasts, 0);
-    const ownerSigned = await owner.signOnlyTransaction(template.clone()),
-      partial = service.store.load(current.offerId)!;
-    partial.userSignedBytes = ccc.hexFrom(ownerSigned.toBytes());
-    partial.state = 'owner-signed';
-    service.store.save(partial);
+    const ownerSigned = await owner.signOnlyTransaction(template.clone());
+    const submission = {
+      offerId: current.offerId,
+      rawHash: current.rawHash,
+      userSignedBytes: ownerSigned.toHex(),
+    };
+    const accepted = await service.submit(submission, true);
+    assert.equal(accepted.ownerSignatureAccepted, true);
+    assert.equal(accepted.state, 'owner-signed');
+    assert.equal(accepted.signedBytes, undefined);
+    assert.equal(broadcasts, 0, 'acceptance returns before sponsor signing or broadcast');
+    assert.equal(service.store.load(current.offerId)?.userSignedBytes, ownerSigned.toHex());
+    const duplicate = structuredClone(service.store.load(current.offerId)!);
+    duplicate.offer.offerId = randomUUID();
+    duplicate.requestId = randomUUID();
+    delete duplicate.userSignedBytes;
+    duplicate.state = 'cancelled';
+    service.store.save(duplicate);
+    const duplicateStatus = await service.rejectUnsigned({
+      offerId: duplicate.offer.offerId,
+      rawHash: duplicate.offer.rawHash,
+    });
+    assert.equal(
+      duplicateStatus.unsignedRejection,
+      undefined,
+      'an accepted alias prevents a false no-payment proof',
+    );
+
+    const readCell = client.getCellLiveNoCache;
+    client.getCellLiveNoCache = async () => {
+      throw Error('RPC unavailable after acceptance');
+    };
+    try {
+      assert.deepEqual(
+        await service.submit(submission, true),
+        accepted,
+        'lost acknowledgement retries are idempotent without RPC',
+      );
+      await assert.rejects(
+        service.submit({ ...submission, userSignedBytes: current.unsignedBytes }, true),
+        /Another owner signature/,
+      );
+      await journal.exclusive(async () => {
+        assert.deepEqual(
+          service.receipt(submission),
+          accepted,
+          'receipt does not acquire the held spending lease',
+        );
+      });
+    } finally {
+      client.getCellLiveNoCache = readCell;
+    }
+    console.log(
+      'PASS durable owner acceptance precedes signing, survives lost responses and reads without RPC or lease',
+    );
     now = NOW + 3_700_000;
     const restarted = new BatchService({
       ...options,
@@ -423,6 +541,48 @@ async function main() {
     for (const [key, cell] of canonicalCells) cells.set(key, cell);
     await restarted.status({ offerId: current.offerId, rawHash: current.rawHash });
     now = NOW;
+    const fundedRequest = {
+      requestId: randomUUID(),
+      ownerAddress,
+      userInputs: [{ txHash: committed.hash(), index: 41 }],
+      picks: [picks[0]],
+    };
+    const firstFunded = await service.prepareOffer(fundedRequest);
+    await service.cancelReview(fundedRequest.requestId, ownerAddress);
+    const nextFunded = await service.prepareOffer({ ...fundedRequest, requestId: randomUUID() });
+    assert.equal(firstFunded.lines[0].mode, 'deposit');
+    assert.notEqual(
+      nextFunded.rawHash,
+      firstFunded.rawHash,
+      'a fresh review cannot revive a retired hash',
+    );
+    assert.equal(BigInt(nextFunded.feeShannons), BigInt(firstFunded.feeShannons) + 1n);
+    assert.deepEqual(nextFunded.inputs, firstFunded.inputs);
+    assert.equal(nextFunded.reserveShannons, firstFunded.reserveShannons);
+    assert.equal(
+      ccc.Transaction.fromBytes(nextFunded.unsignedBytes).outputs[
+        nextFunded.sponsorChangeOutputIndex
+      ].capacity,
+      ccc.Transaction.fromBytes(firstFunded.unsignedBytes).outputs[
+        firstFunded.sponsorChangeOutputIndex
+      ].capacity,
+    );
+    assert.equal(service.store.load(firstFunded.offerId)?.offer.rawHash, firstFunded.rawHash);
+    assert.equal(service.store.load(firstFunded.offerId)?.state, 'cancelled');
+    assert.equal(
+      (
+        await service.prepareOffer({
+          ...fundedRequest,
+          requestId: service.store.load(nextFunded.offerId)!.requestId,
+        })
+      ).rawHash,
+      nextFunded.rawHash,
+      'same request retains its exact review',
+    );
+    await service.cancelReview(service.store.load(nextFunded.offerId)!.requestId, ownerAddress);
+    console.log(
+      'PASS identical fresh funded reviews get distinct hashes without changing signed history',
+    );
     const nextDemand = await service.describe('api-football-9010'),
       mixed = await service.prepareOffer({
         requestId: randomUUID(),
@@ -471,6 +631,70 @@ async function main() {
     await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
     const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     try {
+      assert.equal((await fetch(`${endpoint}/health`)).status, 401);
+      const configurationBeforeHealth = service.configuration;
+      let releaseConfiguration!: () => void;
+      let started = 0;
+      const held = new Promise<void>((resolve) => {
+        releaseConfiguration = resolve;
+      });
+      service.configuration = async () => {
+        started++;
+        await held;
+        throw Error('Synthetic unavailable chain configuration');
+      };
+      const requests = Array.from({ length: 4 }, () =>
+        fetch(`${endpoint}/batch/configuration`, {
+          headers: { authorization: `Bearer ${secret}` },
+        }),
+      );
+      try {
+        const deadline = Date.now() + 3000;
+        while (started < 4 && Date.now() < deadline)
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        assert.equal(started, 4);
+        assert.equal(
+          (
+            await fetch(`${endpoint}/batch/configuration`, {
+              headers: { authorization: `Bearer ${secret}` },
+            })
+          ).status,
+          429,
+        );
+        const health = await fetch(`${endpoint}/health`, {
+          headers: { authorization: `Bearer ${secret}` },
+          signal: AbortSignal.timeout(1000),
+        });
+        assert.equal(health.status, 200);
+        assert.deepEqual(await health.json(), {
+          service: 'streak-sponsor',
+          ready: true,
+          batchEnabled: true,
+        });
+        assert.equal(started, 4, 'health never invokes payment configuration');
+        const receipt = await fetch(
+          `${endpoint}/batch/status?offerId=${mixed.offerId}&rawHash=${mixed.rawHash}`,
+          {
+            headers: { authorization: `Bearer ${secret}` },
+            signal: AbortSignal.timeout(1000),
+          },
+        );
+        assert.equal(receipt.status, 200, 'saved receipt bypasses saturated RPC slots');
+        assert.equal(
+          ((await receipt.json()) as { transactionHash: string }).transactionHash,
+          mixed.rawHash,
+        );
+        assert.equal(started, 4);
+      } finally {
+        releaseConfiguration();
+        await Promise.all(
+          requests.map(async (request) => {
+            const response = await request;
+            await response.arrayBuffer();
+          }),
+        );
+        service.configuration = configurationBeforeHealth;
+      }
       assert.equal((await fetch(`${endpoint}/batch/configuration`)).status, 401);
       const response = await fetch(`${endpoint}/batch/configuration`, {
           headers: { authorization: `Bearer ${secret}` },

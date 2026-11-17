@@ -30,7 +30,7 @@ export async function sponsorProxy(
   )
     throw Error('Sponsor service must use an explicit loopback HTTP port');
   if (
-    !/^\/(?:batch\/)?(?:configuration|fixture|status|offer|submit|resolve|resume|cancel-review)(?:\?.*)?$/.test(
+    !/^\/(?:batch\/)?(?:configuration|fixture|status|offer|submit|resolve|resume|reject|cancel-review)(?:\?.*)?$/.test(
       path,
     ) &&
     !/^\/activity\/(?:events|ack)$/.test(path) &&

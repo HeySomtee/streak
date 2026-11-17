@@ -31,8 +31,11 @@ export type BatchRecord = Readonly<{
     | 'unknown'
     | 'committed'
     | 'resolved'
-    | 'discarded';
+    | 'discarded'
+    | 'rejected';
   submissionAttemptedAt?: number;
+  serverAccepted?: true;
+  serverRejectedAt?: number;
   discardedAt?: number;
   blockHash?: string;
   blockNumber?: string;
@@ -86,6 +89,7 @@ export async function parseBatchRecord(value: unknown): Promise<BatchRecord> {
       'committed',
       'resolved',
       'discarded',
+      'rejected',
     ].includes(String(row.status)) ||
     JSON.stringify(reservation.inputs) !== JSON.stringify(inputPoints(partial)) ||
     JSON.stringify(row.descriptor) !== JSON.stringify(offer.descriptor) ||
@@ -101,8 +105,17 @@ export async function parseBatchRecord(value: unknown): Promise<BatchRecord> {
     (typeof row.blockNumber !== 'string' || !/^(0|[1-9]\d{0,19})$/.test(row.blockNumber))
   )
     throw Error('Invalid saved confirmation height.');
+  if (
+    row.serverAccepted !== undefined &&
+    (row.serverAccepted !== true || !row.submissionAttemptedAt)
+  )
+    throw Error('Invalid saved server acceptance.');
   return Object.freeze({
     version: 'atomic-predictions-v1',
+    ...(row.serverAccepted === true ? { serverAccepted: true as const } : {}),
+    ...(row.serverRejectedAt === undefined
+      ? {}
+      : { serverRejectedAt: integer(row.serverRejectedAt, 1, Number.MAX_SAFE_INTEGER) }),
     scope: text(row.scope, 300),
     ownerHash,
     descriptor: offer.descriptor,
@@ -152,6 +165,10 @@ export class IndexedBatchJournal implements BatchJournal {
       ] as const)
         if (JSON.stringify(row[key]) !== JSON.stringify(checked[key]))
           throw Error('Saved combined transaction identity cannot change.');
+      if (row.serverRejectedAt !== undefined && row.serverRejectedAt !== checked.serverRejectedAt)
+        throw Error('The saved server rejection cannot change.');
+      if (row.serverAccepted && !checked.serverAccepted)
+        throw Error('A server-accepted signature cannot become unaccepted.');
       if (row.finalSignedBytes && row.finalSignedBytes !== checked.finalSignedBytes)
         throw Error('The final signed bytes are immutable.');
       if (

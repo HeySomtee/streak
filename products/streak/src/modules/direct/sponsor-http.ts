@@ -78,6 +78,29 @@ export function createSponsorServer(
     const actual = Buffer.from(req.headers.authorization ?? '');
     if (actual.length !== expected.length || !timingSafeEqual(actual, expected))
       return reply(res, 401, { error: 'Sponsor IPC authentication required.' });
+    // Process readiness must not depend on chain reads or available payment slots.
+    // The launcher still verifies configured queued code before opening this listener.
+    if (req.url === '/health' && req.method === 'GET')
+      return reply(res, 200, { service: 'streak-sponsor', ready: true, batchEnabled: !!batch });
+    if (req.method === 'GET' && /^\/(batch\/)?status\?/.test(req.url ?? '')) {
+      try {
+        const url = new URL(req.url!, 'http://127.0.0.1');
+        const service = url.pathname === '/batch/status' ? batch : legacy;
+        if (!service) return reply(res, 409, { error: 'Payment service is not active.' });
+        return reply(
+          res,
+          200,
+          service.receipt({
+            offerId: sponsorId(url.searchParams.get('offerId')),
+            rawHash: hash32(url.searchParams.get('rawHash'), 'transaction hash'),
+          }),
+        );
+      } catch {
+        return reply(res, 409, {
+          error: 'Saved payment receipt is unavailable. Keep the original payment.',
+        });
+      }
+    }
     if (active >= 4)
       return reply(res, 429, {
         error: 'Sponsor queue is busy. Retry with the same request identity.',
@@ -151,6 +174,7 @@ export function createSponsorServer(
           '/offer',
           '/submit',
           '/resolve',
+          '/reject',
           '/resume',
           '/cancel-review',
         ].includes(url.pathname)
@@ -177,7 +201,9 @@ export function createSponsorServer(
         );
       if (
         req.method !== 'POST' ||
-        !['/offer', '/submit', '/resolve', '/resume', '/cancel-review'].includes(url.pathname)
+        !['/offer', '/submit', '/resolve', '/resume', '/reject', '/cancel-review'].includes(
+          url.pathname,
+        )
       )
         return reply(res, 404, { error: 'Unknown sponsor operation.' });
       const payload = await body(req);
@@ -208,6 +234,10 @@ export function createSponsorServer(
       const entry = service.store.load(offerId);
       if (!entry || entry.ownerAddress !== authenticated || entry.offer.rawHash !== rawHash)
         return reply(res, 403, { error: 'This proposal belongs to another wallet.' });
+      if (url.pathname === '/reject') {
+        if (!atomic) return reply(res, 404, { error: 'Unknown sponsor operation.' });
+        return reply(res, 200, await service.rejectUnsigned({ offerId, rawHash }));
+      }
       if (url.pathname === '/resume')
         return reply(res, 200, await service.status({ offerId, rawHash }, true));
       if (url.pathname === '/resolve')
@@ -221,15 +251,17 @@ export function createSponsorServer(
           }),
         );
       if (typeof request.userSignedBytes !== 'string') throw Error('Owner signature required');
-      return reply(
-        res,
-        200,
-        await service.submit({
+      const accepted = await service.submit(
+        {
           offerId,
           rawHash,
           userSignedBytes: request.userSignedBytes,
-        } satisfies SponsorSubmitRequest),
+        } satisfies SponsorSubmitRequest,
+        atomic,
       );
+      reply(res, 200, accepted);
+      server.emit('payment-accepted');
+      return;
     } catch (error) {
       if (
         error instanceof ReviewWaitingError ||

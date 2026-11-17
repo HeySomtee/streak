@@ -613,3 +613,202 @@ test('Recovery draft metadata must exactly match every reviewed line and is froz
     /draft lines differ/,
   );
 });
+
+test('A signed payment reaches durable server acceptance before any public chain lookup', async () => {
+  const s = await setup();
+  const review = await s.client.prepare(picks(s.chain.fixtures(), 1));
+  const record = await s.client.signAndPersist(review, s.chain.fixtures());
+  let deliveries = 0;
+  s.rpc.getTransactionNoCache = async () => {
+    throw Error('Public RPC offline');
+  };
+  s.transport.status = async () => {
+    throw Error('Status offline');
+  };
+  s.transport.submit = async (request) => {
+    deliveries++;
+    assert.equal(request.userSignedBytes, record.ownerSignedBytes);
+    assert.ok(s.records.get(record.hash).submissionAttemptedAt);
+    return {
+      offer: review.offer,
+      state: 'owner-signed',
+      transactionHash: record.hash,
+      ownerSignatureAccepted: true,
+    };
+  };
+  const accepted = await s.client.submit(record);
+  assert.equal(deliveries, 1);
+  assert.equal(accepted.record.serverAccepted, true);
+  assert.equal(accepted.status, 'awaiting-sponsor');
+  assert.match(accepted.message, /can leave/);
+  const recovered = await s.client.monitor(record);
+  assert.equal(recovered.record.serverAccepted, true);
+  assert.equal(deliveries, 1, 'accepted payment is server owned, not resubmitted by monitor');
+  assert.match(recovered.message, /processing continues automatically/);
+});
+
+test('Delivery retries exact bytes with bounded backoff, then stops after saved acceptance', async () => {
+  const s = await setup();
+  const review = await s.client.prepare(picks(s.chain.fixtures(), 1));
+  const record = await s.client.signAndPersist(review, s.chain.fixtures());
+  const sent = [];
+  let accepted = false;
+  const receipt = () => ({
+    offer: review.offer,
+    state: accepted ? 'owner-signed' : 'offered',
+    transactionHash: record.hash,
+    ...(accepted ? { ownerSignatureAccepted: true } : {}),
+  });
+  s.transport.status = async () => receipt();
+  s.transport.submit = async (request) => {
+    sent.push(request.userSignedBytes);
+    if (sent.length === 1) throw Error('502 before server receipt');
+    accepted = true;
+    return receipt();
+  };
+  s.signer.signTransaction = async () => {
+    throw Error('No repeat wallet approval');
+  };
+  const first = await s.client.submit(record);
+  assert.match(first.message, /Keep Streak open/);
+  await s.client.monitor(record);
+  assert.equal(sent.length, 1, 'no immediate retry burst');
+  s.advance(5001);
+  const delivered = await s.client.monitor(record);
+  assert.equal(delivered.record.serverAccepted, true);
+  assert.deepEqual(sent, [record.ownerSignedBytes, record.ownerSignedBytes]);
+  await s.client.monitor(record);
+  assert.equal(sent.length, 2);
+});
+
+test('Lost acceptance response is recovered from receipt after reload without re-signing or redelivery', async () => {
+  const s = await setup();
+  const review = await s.client.prepare(picks(s.chain.fixtures(), 1));
+  const record = await s.client.signAndPersist(review, s.chain.fixtures());
+  let accepted = false,
+    sent = 0;
+  s.transport.submit = async () => {
+    sent++;
+    accepted = true;
+    throw Error('Response lost after durable save');
+  };
+  s.transport.status = async () => ({
+    offer: review.offer,
+    state: 'owner-signed',
+    transactionHash: record.hash,
+    ...(accepted ? { ownerSignatureAccepted: true } : {}),
+  });
+  await s.client.submit(record);
+  s.rpc.getTransactionNoCache = async () => {
+    throw Error('Node offline');
+  };
+  const restored = new BatchClient(s.signer, s.transport, s.journal, {
+    exclusive: async (_name, action) => action(),
+  });
+  const recovered = await restored.monitor(
+    await parseBatchRecord(structuredClone(s.records.get(record.hash))),
+  );
+  assert.equal(recovered.record.serverAccepted, true);
+  assert.equal(sent, 1);
+});
+
+test('Monitoring does not deliver a first signature after its offer expired or was cancelled', async () => {
+  for (const state of ['expired', 'cancelled']) {
+    const s = await setup();
+    const review = await s.client.prepare(picks(s.chain.fixtures(), 1));
+    const record = await s.client.signAndPersist(review, s.chain.fixtures());
+    s.advance(100_000);
+    s.transport.status = async () => ({
+      offer: review.offer,
+      state,
+      transactionHash: record.hash,
+      ...(state === 'cancelled' ? { unsignedCancellation: true } : {}),
+    });
+    s.transport.submit = async () => {
+      throw Error('Must not deliver rejected signature');
+    };
+    const result = await s.client.monitor(record);
+    assert.equal(result.record.submissionAttemptedAt, undefined);
+    assert.equal(result.record.serverAccepted, undefined);
+  }
+});
+
+test('An attempted but unaccepted payment retires only after a permanent server rejection, preserving its audit trail', async () => {
+  const s = await setup();
+  const review = await s.client.prepare(picks(s.chain.fixtures(), 1));
+  const record = await s.client.signAndPersist(review, s.chain.fixtures());
+  s.transport.submit = async () => {
+    throw Error('502 before delivery');
+  };
+  const pending = await s.client.submit(record);
+  s.advance(100_000);
+  s.transport.status = async () => ({
+    offer: review.offer,
+    transactionHash: record.hash,
+    state: 'expired',
+  });
+  s.transport.reject = async () => ({
+    offer: review.offer,
+    transactionHash: record.hash,
+    state: 'cancelled',
+    unsignedCancellation: true,
+    unsignedRejection: true,
+  });
+  const rejected = await s.client.monitor(pending.record);
+  assert.equal(rejected.status, 'rejected');
+  assert.equal(rejected.record.submissionAttemptedAt, pending.record.submissionAttemptedAt);
+  assert.equal(rejected.record.ownerSignedBytes, record.ownerSignedBytes);
+  const restored = await parseBatchRecord(structuredClone(rejected.record));
+  assert.equal(await reservationReleased(s.rpc, parseReservation(restored)), true);
+  assert.equal((await s.client.monitor(restored)).status, 'rejected');
+  s.rpc.getTransactionNoCache = async () => {
+    throw Error('Node offline');
+  };
+  assert.match((await s.client.monitor(restored)).message, /not accepted/);
+  await assert.rejects(
+    parseBatchRecord({ ...restored, serverAccepted: true }),
+    /Invalid server-rejected/,
+  );
+});
+
+test('Expired offer alone cannot release an attempted payment when a duplicate hash may be accepted', async () => {
+  const s = await setup();
+  const review = await s.client.prepare(picks(s.chain.fixtures(), 1));
+  const record = await s.client.signAndPersist(review, s.chain.fixtures());
+  s.transport.submit = async () => {
+    throw Error('Lost response');
+  };
+  const pending = await s.client.submit(record);
+  s.advance(100_000);
+  s.transport.status = async () => ({
+    offer: review.offer,
+    transactionHash: record.hash,
+    state: 'expired',
+  });
+  s.transport.reject = async () => ({
+    offer: review.offer,
+    transactionHash: record.hash,
+    state: 'cancelled',
+    unsignedCancellation: true,
+  });
+  const unresolved = await s.client.monitor(pending.record);
+  assert.notEqual(unresolved.status, 'rejected');
+  assert.equal(unresolved.record.serverRejectedAt, undefined);
+  assert.equal(await reservationReleased(s.rpc, parseReservation(unresolved.record)), false);
+});
+
+test('Accepted receipts survive header and tip RPC outages without a new wallet prompt', async () => {
+  for (const method of ['getHeaderByNumberNoCache', 'getTipHeader']) {
+    const s = await setup();
+    const review = await s.client.prepare(picks(s.chain.fixtures(), 1));
+    const record = await s.client.signAndPersist(review, s.chain.fixtures());
+    s.rpc[method] = async () => {
+      throw Error('RPC outage');
+    };
+    const result = await s.client.submit(record);
+    assert.equal(result.record.serverAccepted, true);
+    assert.equal(s.chain.submissions.length, 1);
+    assert.notEqual(result.status, 'confirmed');
+    assert.match(result.message, /Reconnecting/);
+  }
+});

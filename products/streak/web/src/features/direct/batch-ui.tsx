@@ -60,11 +60,12 @@ export function BatchTransaction({
   const [conflict, setConflict] = useState('');
   const recovery = useQuery({
     queryKey: ['direct-private', record.ownerHash, 'batch-recovery', record.hash],
-    queryFn: () => client.recover(record),
+    queryFn: () => client.monitor(record),
     enabled: active,
     retry: false,
     refetchInterval: (query) =>
-      active && !['confirmed', 'resolved', 'discarded'].includes(query.state.data?.status ?? '')
+      active &&
+      !['confirmed', 'resolved', 'discarded', 'rejected'].includes(query.state.data?.status ?? '')
         ? 15_000
         : false,
     refetchIntervalInBackground: false,
@@ -118,11 +119,13 @@ export function BatchTransaction({
               ? 'Confirming'
               : status === 'submitted'
                 ? 'Submitted'
-                : status === 'resolved' || status === 'discarded'
+                : status === 'resolved' || status === 'discarded' || status === 'rejected'
                   ? 'Not paid'
-                  : status === 'awaiting-sponsor' && current.submissionAttemptedAt
-                    ? 'Checking'
-                    : 'Check payment'}
+                  : current.serverAccepted && status === 'awaiting-sponsor'
+                    ? 'Processing'
+                    : status === 'awaiting-sponsor' && current.submissionAttemptedAt
+                      ? 'Connecting'
+                      : 'Check payment'}
         </span>
       </div>
       <ul>
@@ -151,9 +154,11 @@ export function BatchTransaction({
         </p>
       )}
       <div className="batch-actions">
-        <a href={explorer(record.hash)} target="_blank" rel="noreferrer">
-          View transaction ↗
-        </a>
+        {status && ['submitted', 'committed', 'confirmed'].includes(status) && (
+          <a href={explorer(record.hash)} target="_blank" rel="noreferrer">
+            View transaction ↗
+          </a>
+        )}
         <button
           className="quiet"
           disabled={recovery.isFetching || busy}
@@ -161,17 +166,19 @@ export function BatchTransaction({
         >
           {recovery.isFetching ? <PaymentButtonState label="Refresh status" /> : 'Refresh status'}
         </button>
-        {status && ['awaiting-sponsor', 'unknown', 'reorg'].includes(status) && (
-          <button
-            className="connect"
-            disabled={busy || recovery.data?.inputsLive !== true}
-            onClick={() => resume.mutate()}
-          >
-            {resume.isPending ? <PaymentButtonState label="Resuming..." /> : 'Resume payment'}
-          </button>
-        )}
+        {status &&
+          !current.serverAccepted &&
+          ['awaiting-sponsor', 'unknown', 'reorg'].includes(status) && (
+            <button
+              className="connect"
+              disabled={busy || recovery.data?.inputsLive === false}
+              onClick={() => resume.mutate()}
+            >
+              {resume.isPending ? <PaymentButtonState label="Resuming..." /> : 'Resume payment'}
+            </button>
+          )}
       </div>
-      {status && ['conflict', 'unknown', 'reorg'].includes(status) && (
+      {status && ['conflict', 'reorg'].includes(status) && (
         <details>
           <summary>Resolve a conflicting transaction</summary>
           <label>
@@ -368,14 +375,15 @@ export function BatchCheckout({
     queryFn: async () => {
       const rows = await linked.data!.history();
       const ordered = rows
-        .filter((row) => !['discarded', 'resolved'].includes(row.status))
+        .filter((row) => !['discarded', 'resolved', 'rejected'].includes(row.status))
         .sort((a, b) => b.createdAt - a.createdAt);
       // Pending signatures take precedence. Activity retains the full archive.
       const candidates = ordered.filter((row) => row.status !== 'committed').slice(0, 1);
       if (!candidates.length && ordered[0]) candidates.push(ordered[0]);
       for (const row of candidates) {
         const recovery = await linked.data!.recover(row);
-        if (!['confirmed', 'resolved', 'discarded'].includes(recovery.status)) return recovery;
+        if (!['confirmed', 'resolved', 'discarded', 'rejected'].includes(recovery.status))
+          return recovery;
       }
       return null;
     },
@@ -623,7 +631,7 @@ export function BatchCheckout({
   const currentRecord = saved?.identityKey === identityKey ? saved.record : result?.record;
   const background = useQuery({
     queryKey: ['direct-private', currentRecord?.ownerHash, 'batch-recovery', currentRecord?.hash],
-    queryFn: () => linked.data!.recover(currentRecord!),
+    queryFn: () => linked.data!.monitor(currentRecord!),
     enabled: !!currentRecord && !!linked.data && !submit.isPending,
     retry: false,
     refetchInterval: currentRecord && !submit.isPending ? 10_000 : false,
@@ -635,7 +643,8 @@ export function BatchCheckout({
       : result?.record.hash === currentRecord?.hash
         ? result
         : null;
-  const terminal = !!recovered && ['confirmed', 'resolved', 'discarded'].includes(recovered.status);
+  const terminal =
+    !!recovered && ['confirmed', 'resolved', 'discarded', 'rejected'].includes(recovered.status);
   const acknowledged =
     !!recovered && ['submitted', 'committed', 'confirmed'].includes(recovered.status);
   const error =
@@ -684,17 +693,21 @@ export function BatchCheckout({
       : currentRecord
         ? recovered?.status === 'confirmed'
           ? 'confirmed'
-          : recovered?.status === 'resolved' || recovered?.status === 'discarded'
+          : recovered?.status === 'resolved' ||
+              recovered?.status === 'discarded' ||
+              recovered?.status === 'rejected'
             ? 'resolved'
             : recovered?.status === 'submitted' || recovered?.status === 'committed'
               ? 'confirming'
-              : recovered?.status === 'unknown' ||
-                  recovered?.status === 'reorg' ||
-                  (recovered?.status === 'awaiting-sponsor' &&
-                    !!recovered.record.submissionAttemptedAt) ||
-                  !recovered
-                ? 'checking'
-                : 'attention'
+              : recovered?.record.serverAccepted && recovered.status === 'awaiting-sponsor'
+                ? 'processing'
+                : recovered?.status === 'unknown' ||
+                    recovered?.status === 'reorg' ||
+                    (recovered?.status === 'awaiting-sponsor' &&
+                      !!recovered.record.submissionAttemptedAt) ||
+                    !recovered
+                  ? 'checking'
+                  : 'attention'
         : prepare.isPending && prepare.variables?.identityKey === identityKey
           ? waitingPosition !== null
             ? 'waiting'

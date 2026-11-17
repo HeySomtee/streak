@@ -10,6 +10,7 @@ export type Reservation = Readonly<{
   fixtureIds?: readonly string[];
   conflictProof?: ConflictProof;
   discardedUnsubmitted?: true;
+  rejectedUnsigned?: true;
 }>;
 export function parseReservation(value: unknown): Reservation {
   const row = object(value),
@@ -31,6 +32,17 @@ export function parseReservation(value: unknown): Reservation {
     if (fixtureIds[0] !== descriptor.fixtureId || new Set(fixtureIds).size !== fixtureIds.length)
       throw Error('Invalid combined fixture identities.');
   }
+  const rejected = row.version === 'atomic-predictions-v1' && row.status === 'rejected';
+  if (
+    rejected &&
+    (row.serverAccepted ||
+      row.finalSignedBytes ||
+      !Number.isSafeInteger(row.createdAt) ||
+      Number(row.createdAt) <= 0 ||
+      !Number.isSafeInteger(row.serverRejectedAt) ||
+      Number(row.serverRejectedAt) < Number(row.createdAt))
+  )
+    throw Error('Invalid server-rejected payment retirement.');
   const expiry = discarded
     ? integer(object(row.offer).expiresAt, 1, Number.MAX_SAFE_INTEGER)
     : undefined;
@@ -66,6 +78,7 @@ export function parseReservation(value: unknown): Reservation {
         }
       : {}),
     ...(discarded ? { discardedUnsubmitted: true as const } : {}),
+    ...(rejected ? { rejectedUnsigned: true as const } : {}),
   });
 }
 export async function canonicalConflict(
@@ -99,7 +112,7 @@ export async function reservationReleased(
   client: ccc.Client,
   record: Reservation,
 ): Promise<boolean> {
-  if (record.discardedUnsubmitted) return true;
+  if (record.discardedUnsubmitted || record.rejectedUnsigned) return true;
   const response = await client.getTransactionNoCache(record.hash);
   if (
     response?.status === 'committed' &&

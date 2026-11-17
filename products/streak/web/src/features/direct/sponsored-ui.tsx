@@ -310,9 +310,11 @@ export function SponsoredTransaction({
       <p>
         {names[record.offer.outcome]} · {money(record.offer.principalShannons)} stake
       </p>
-      <a href={href(record.hash)} target="_blank" rel="noreferrer">
-        View transaction
-      </a>
+      {['submitted', 'committed', 'confirmed'].includes(state) && (
+        <a href={href(record.hash)} target="_blank" rel="noreferrer">
+          View transaction
+        </a>
+      )}
       <p role="status">
         {recovery.isFetching ? (
           <PaymentButtonState

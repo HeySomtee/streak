@@ -12,6 +12,7 @@ export type PaymentStage =
   | 'ready'
   | 'authorizing'
   | 'sending'
+  | 'processing'
   | 'checking'
   | 'confirming'
   | 'confirmed'
@@ -31,6 +32,10 @@ const copy: Record<PaymentStage, [string, string]> = {
   ready: ['Your payment is ready', 'Open your slip to check the total.'],
   authorizing: ['Preparing wallet approval', 'Checking the payment before your wallet signs.'],
   sending: ['Completing your signed payment', 'Your signature is saved. You can keep exploring.'],
+  processing: [
+    'Payment saved for processing',
+    'You can leave the app. Streak will continue automatically.',
+  ],
   checking: ['Checking your payment', 'Waiting for a verified network update.'],
   confirming: ['Predictions on the network', 'Waiting for confirmation. Keep exploring.'],
   confirmed: ['Payment confirmed. You’re all set.', 'Follow your predictions in My activity.'],
@@ -67,6 +72,7 @@ export function PaymentProgress({
     'queued',
     'authorizing',
     'sending',
+    'processing',
     'checking',
     'confirming',
   ].includes(stage);

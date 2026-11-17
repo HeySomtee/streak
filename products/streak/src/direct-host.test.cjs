@@ -340,8 +340,9 @@ if(role === 'worker') {
   const port = role === 'api' ? Number(process.env.PORT) : Number(new URL(process.env.STREAK_SPONSOR_URL).port);
   const server = http.createServer((req,res)=>{
     if (role === 'sponsor' && req.headers.authorization !== 'Bearer '+process.env.STREAK_SPONSOR_IPC_SECRET) return res.writeHead(401).end();
+    if (role === 'sponsor' && req.url !== '/health') return res.writeHead(503).end();
     res.setHeader('content-type','application/json');
-    res.end(JSON.stringify(role === 'api' ? {network:'testnet',codeDeps:[{},{}]} : {sponsorLock:{codeHash:'synthetic'}}));
+    res.end(JSON.stringify(role === 'api' ? {network:'testnet',codeDeps:[{},{}]} : {service:'streak-sponsor',ready:true,batchEnabled:true}));
   }).listen(port,'127.0.0.1');
   process.on('SIGTERM',()=>server.close(()=>process.exit(0)));
   if(mode === 'crash') setTimeout(()=>process.exit(2),350);

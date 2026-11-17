@@ -590,9 +590,12 @@ async function runHost(config, options = {}) {
       options.sponsorCheck ||
       (() =>
         probe(
-          `${config.environments.sponsor.STREAK_SPONSOR_URL}/batch/configuration`,
+          `${config.environments.sponsor.STREAK_SPONSOR_URL}/health`,
           { authorization: `Bearer ${config.environments.sponsor.STREAK_SPONSOR_IPC_SECRET}` },
-          (value) => typeof value.sponsorLock?.codeHash === 'string',
+          (value) =>
+            value.service === 'streak-sponsor' &&
+            value.ready === true &&
+            value.batchEnabled === true,
         ));
     if (!(await waitReady(sponsorCheck, 'Sponsor'))) return await done;
     log('API and atomic sponsor are ready. Starting serialized settlement passes.');

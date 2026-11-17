@@ -101,6 +101,8 @@ export const batchTransport: BatchTransport = {
         60_000,
       ),
     ),
+  reject: async (body) =>
+    parseBatchStatus(await request('/direct/batch/reject', undefined, body, 60_000)),
   resume: async (body) =>
     parseBatchStatus(await request('/direct/batch/resume', undefined, body, 60_000)),
   resolve: async (body) =>

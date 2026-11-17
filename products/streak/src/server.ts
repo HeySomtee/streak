@@ -1469,7 +1469,7 @@ async function handleDemand(
   } catch {atomic?sendJson(res,200,envelope([],false,'Atomic sponsorship is temporarily unavailable. Existing signed payments remain recoverable.')):sendJson(res,503,{error:'Sponsored market creation is temporarily unavailable. Existing positions remain recoverable.'});
   }
 }
-async function handleSponsor(req:IncomingMessage,res:ServerResponse,url:URL,action:'offer'|'submit'|'resume'|'resolve'|'status'|'release'|'cancel-review',atomic=false):Promise<void> {
+async function handleSponsor(req:IncomingMessage,res:ServerResponse,url:URL,action:'offer'|'submit'|'resume'|'resolve'|'status'|'release'|'reject'|'cancel-review',atomic=false):Promise<void> {
   const prefix=atomic?'/batch':'';
   if(action==='status') {
     const offerId=url.searchParams.get('offerId'),rawHash=url.searchParams.get('rawHash');
@@ -1477,7 +1477,10 @@ async function handleSponsor(req:IncomingMessage,res:ServerResponse,url:URL,acti
     if(!sponsorRate(`status:${req.socket.remoteAddress}`,60))return sendJson(res,429,{error:'Please wait before refreshing transaction status.'});
     try {
       const result = await sponsorProxy(`${prefix}/status?offerId=${encodeURIComponent(offerId)}&rawHash=${rawHash}`);
-      if (atomic && campaignPaymentsEnabled()) await campaignEntryPayments().observe(result);
+      if (atomic && campaignPaymentsEnabled()) {
+        try { await campaignEntryPayments().observe(result); }
+        catch { console.warn('[payments] receipt bookkeeping awaits retry'); }
+      }
       sendJson(res,200,result); activityService()?.wake();
     }
     catch {sendJson(res,503,{error:'Sponsor status is unavailable. Keep the saved transaction and try recovery again.'});}
@@ -1501,7 +1504,10 @@ async function handleSponsor(req:IncomingMessage,res:ServerResponse,url:URL,acti
     if (payments && actor && (action === 'submit' || action === 'resume')) await payments.start(actor, request);
     const result = await sponsorProxy(`${prefix}/${action}`, request, address);
     if (payments && actor && action === 'offer') await payments.reserve(actor, entryPaymentOffer(result), selection);
-    else if (payments) await payments.observe(result);
+    else if (payments) {
+      try { await payments.observe(result); }
+      catch { console.warn('[payments] receipt bookkeeping awaits retry'); }
+    }
     sendJson(res,200,result); activityService()?.wake();
   }
   catch(error) {sendJson(res,error instanceof SponsorProxyError || error instanceof CampaignError ?error.status:409,{error:error instanceof SponsorProxyError || error instanceof CampaignError ?error.message:'Sponsored operation could not complete. Preserve any signed transaction and check its status before retrying.',...(error instanceof SponsorProxyError && error.reviewWait ? {reviewWait:error.reviewWait} : {})});}
@@ -1698,6 +1704,7 @@ const staticRoutes: Record<string, Handler> = {
   "POST /api/direct/batch/release": (req,res,url)=>handleSponsor(req,res,url,'release',true),
   "POST /api/direct/batch/cancel-review": (req,res,url)=>handleSponsor(req,res,url,'cancel-review',true),
   "POST /api/direct/batch/submit": (req,res,url)=>handleSponsor(req,res,url,'submit',true),
+  "POST /api/direct/batch/reject": (req,res,url)=>handleSponsor(req,res,url,'reject',true),
   "POST /api/direct/batch/resume": (req,res,url)=>handleSponsor(req,res,url,'resume',true),
   "POST /api/direct/batch/resolve": (req,res,url)=>handleSponsor(req,res,url,'resolve',true),
   "GET /api/direct/batch/status": (req,res,url)=>handleSponsor(req,res,url,'status',true),
