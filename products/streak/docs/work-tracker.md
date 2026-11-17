@@ -1,5 +1,29 @@
 # Streak work tracker
 
+17 November deployment follow-up: hosted prepare returned a generic error; status
+found no v5 record. The binary size matches 47,880 bytes and a current-host
+operator lock belongs to live PID 72. This supports contention, not a proven
+29-minute lock hold. The CLI now waits up to 10 seconds using the existing journal
+lease and reports OperatorBusyError safely. No lease takeover or process stop.
+All five focused lock/CLI regressions pass, including real lock contention and
+redacted errors. Independent deployment review found no blocker. The full release
+gate, publication and hosted retry remain pending. Preserve the owner acceptance checklist.
+
+17 November hosted deployment verified: Render shows the existing service
+streak-terminal (srv-d9nn05u417fc73do0hig) Live from HeySomtee/streak main at
+64ce2e1dfb9ee783b7b76c7d6cccbfbf52877fa0, deployment dep-dbu5800ae00c73ecobog.
+Owner completed the dashboard switch and deployment. This confirms application
+release publication on Render, not v5 public-chain activation or wallet acceptance.
+Next: prepare and review the durable v5 code deployment in the existing service,
+then broadcast, confirm, configure and rehearse as documented. No funds moved by
+the agent; no environment values were inspected or changed.
+
+17 November Render handoff: owner requested the repository switch again. Chrome
+now exposes the Render URL successfully, but the dashboard is signed out at
+login-next. Await owner GitHub sign-in, then change the existing streak-terminal
+repository to HeySomtee/streak and verify deployment while preserving its disk,
+database and environment. No dashboard setting or public activation was changed.
+
 17 November publication completed: [21fbbcf](https://github.com/HeySomtee/streak/commit/21fbbcf)
 is on `HeySomtee/streak` main. All 105 required stages passed in one complete run
 at 12:42 UTC, including the corrected cleanup and database-clock fixtures. Commit

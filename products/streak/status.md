@@ -1,5 +1,14 @@
 # Streak status
 
+17 November deployment follow-up: hosted prepare returned a generic error; status
+found no v5 record. The binary size matches 47,880 bytes and a current-host
+operator lock belongs to live PID 72. This supports contention, not a proven
+29-minute lock hold. The CLI now waits up to 10 seconds using the existing journal
+lease and reports OperatorBusyError safely. No lease takeover or process stop.
+All five focused lock/CLI regressions pass, including real lock contention and
+redacted errors. Independent deployment review found no blocker. The full release
+gate, publication and hosted retry remain pending. Preserve the owner acceptance checklist.
+
 17 November queue release published as [21fbbcf](https://github.com/HeySomtee/streak/commit/21fbbcf).
 All 105 local stages passed in one complete run at 12:42 UTC; commit and push reused
 the exact-tree receipt. Independent money/recovery review found no remaining

@@ -21,9 +21,10 @@ These are synthetic local results, not public-chain or physical-wallet acceptanc
 Earlier attempts exposed two test-tooling issues: cleanup of an already-removed
 temporary directory and host/database clock skew in synthetic campaign evidence.
 Both were corrected before the successful complete run. No failed gate was bypassed.
-Hosted CI remains paused. Render has not been switched or deployed by this release;
-Computer Use stopped at its browser URL-verification boundary. Public activation
-and the hosted rehearsal below remain outstanding.
+Hosted CI remains paused. The owner switched the existing Render service to
+HeySomtee/streak, and its dashboard confirmed commit `64ce2e1` Live on 17 November.
+The public Season page returned HTTP 200. Public activation and the hosted rehearsal
+below remain outstanding. These checks do not establish wallet acceptance.
 
 ## What ships
 
@@ -51,6 +52,12 @@ The reviewed protocol binary is packaged at
 47,880-byte size must match `build-manifest.json`; the Rust gate rebuilds it and
 compares the exact bytes. The CLI verifies the hash again before preparation.
 No Rust installation is needed in the hosted runtime.
+
+The deployment CLI now waits up to 10 seconds for the existing operator lease.
+If it reports busy, keep the lock and retry later. A live process may hold the lock
+for one operation; process uptime is not lock duration. Never stop the signer or
+delete its lock to force deployment. Five isolated CLI/real-lock regressions pass
+and independent review found no blocker; publication of this follow-up is pending.
 
 Run in the service's Shell, where its existing operator environment is available:
 

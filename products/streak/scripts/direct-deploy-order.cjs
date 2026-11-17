@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const ccc = require('@ckb-ccc/core');
-const { OperatorJournal } = require('../dist/modules/direct/journal.js');
+const { OperatorJournal, OperatorBusyError } = require('../dist/modules/direct/journal.js');
 const { DirectRegistry, PUBLIC_DIRECT_CONFIG } = require('../dist/modules/direct/registry.js');
 const {
   OrderDeploymentError,
@@ -28,7 +28,8 @@ async function main() {
     );
   if (process.env.NODE_ENV === 'production' && process.env.STREAK_DIRECT_DURABLE_STATE_ACK !== '1')
     throw new OrderDeploymentError('Durable operator storage must be acknowledged');
-  const journal = new OperatorJournal(directory);
+  // Wait for brief payment/recovery work without taking over its lock.
+  const journal = new OperatorJournal(directory, undefined, 10_000);
   const client = new ccc.ClientPublicTestnet({
     url: PUBLIC_DIRECT_CONFIG.rpc,
     fallbacks: [],
@@ -75,9 +76,11 @@ async function main() {
 }
 main().catch((error) => {
   console.error(
-    error instanceof OrderDeploymentError
-      ? error.message
-      : 'Deployment did not complete. Retain the durable record and run status before retrying.',
+    error instanceof OperatorBusyError
+      ? 'Operator busy after waiting 10 seconds. No deployment action started. Keep the lock and retry this command later.'
+      : error instanceof OrderDeploymentError
+        ? error.message
+        : 'Deployment did not complete. Retain the durable record and run status before retrying.',
   );
   process.exitCode = 1;
 });
