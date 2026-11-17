@@ -19,7 +19,9 @@ export function parseReservation(value: unknown): Reservation {
   const proof = row.conflictProof === undefined ? undefined : object(row.conflictProof);
   const discarded =
     row.status === 'discarded' &&
-    ['sponsored-create-v1', 'atomic-predictions-v1'].includes(String(row.version));
+    ['sponsored-create-v1', 'atomic-predictions-v1', 'queued-predictions-v1'].includes(
+      String(row.version),
+    );
   let fixtureIds: string[] | undefined;
   if (row.version === 'atomic-predictions-v1') {
     const offer = object(row.offer);

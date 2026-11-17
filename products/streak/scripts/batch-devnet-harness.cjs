@@ -7,7 +7,6 @@ const ccc = require('@ckb-ccc/core');
 const { JsonRpcTransformers: J } = require('@ckb-ccc/core/advanced');
 const ROOT = path.resolve(__dirname, '..');
 const ARTIFACTS = path.resolve(ROOT, '../../.quality-artifacts/batch-chain');
-const CONTRACTS = path.join(ROOT, 'contracts/direct-v4');
 const URL = process.argv[2] || 'http://127.0.0.1:8218';
 assert.equal(
   URL,
@@ -152,7 +151,9 @@ function protocol(args) {
 function guarded(ty, capacity = CAP) {
   return { capacity, type: ty, lock: { codeHash: guardHash, hashType: 'data2', args: ty.hash() } };
 }
-async function boot() {
+async function boot(generation = 'v4') {
+  if (!['v4', 'v5'].includes(generation)) throw Error('Unsupported isolated contract generation');
+  const CONTRACTS = path.join(ROOT, `contracts/direct-${generation}`);
   fs.mkdirSync(ARTIFACTS, { recursive: true });
   const genesis = await rpc('get_block_by_number', ['0x0']);
   const info = await rpc('get_blockchain_info');
@@ -237,7 +238,7 @@ async function boot() {
       evidence.finishedAt = new Date().toISOString();
       evidence.tip = await rpc('get_tip_header');
       fs.writeFileSync(
-        path.join(ARTIFACTS, 'harness.json'),
+        path.join(ARTIFACTS, generation === 'v5' ? 'orders-harness.json' : 'harness.json'),
         JSON.stringify(evidence, null, 2) + '\n',
       );
       console.log(`All ${evidence.checks.length} devnet checks passed.`);

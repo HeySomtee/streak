@@ -4,6 +4,7 @@ import type { BatchOffer } from '../../../shared/batch-wire';
 import { OPERATION_FILE, type OperatorJournal } from './journal';
 import { SponsorJournal, type SponsorEntry } from './sponsor-journal';
 import { V4_DIRECT_CONFIG } from './registry';
+import { orderReservedInputs } from './order-reservations';
 
 export const ATOMIC_PAYMENT_LIMIT = 3;
 
@@ -12,12 +13,13 @@ export function atomicReservations(
   journal: OperatorJournal,
   now: number,
   resolved: ReadonlySet<string>,
+  excludeOrderId?: string,
 ) {
   const files = readdirSync(journal.directory).filter((file) => OPERATION_FILE.test(file));
   if (files.length > 1536) throw Error('Operator journal exceeds both generation bounds');
   const operations = files.map((file) => journal.load(file.slice(0, -5))!);
   const byHash = new Map(operations.map((operation) => [operation.transactionHash, operation]));
-  const historyInputs = new Set<string>();
+  const historyInputs = orderReservedInputs(journal.directory, now, undefined, excludeOrderId);
   for (const operation of operations) {
     if (resolved.has(operation.transactionHash)) continue;
     for (const input of ccc.Transaction.fromBytes(operation.signedTransaction).inputs)

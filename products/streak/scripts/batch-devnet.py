@@ -15,7 +15,7 @@ LAB = ROOT / 'src/week20/contract-lab'
 BINARY = LAB / '.tools/ckb_v0.210.0_x86_64-unknown-linux-gnu/ckb'
 RPC = 'http://127.0.0.1:8218'
 flags = sys.argv[1:]
-if flags not in ([], ['--concurrency-only']):
+if flags not in ([], ['--concurrency-only'], ['--orders-only']):
     raise RuntimeError('Expected only the optional --concurrency-only mode.')
 if not BINARY.is_file():
     raise RuntimeError('The pinned CKB 0.210.0 binary is missing. Prepare the Week 20 devnet tools before running this local gate.')
@@ -63,7 +63,7 @@ with (RUN / 'node.log').open('w') as log:
         node = shutil.which('node') or shutil.which('node.exe')
         if not node:
             raise RuntimeError('Node.js 24 is required for product integration tests.')
-        runner = str(Path(__file__).with_name('batch-devnet.cjs'))
+        runner = str(Path(__file__).with_name('order-devnet.cjs' if flags == ['--orders-only'] else 'batch-devnet.cjs'))
         preload = str(ROOT / 'scripts/quality/test-env.cjs')
         if node.endswith('.exe'):
             runner = subprocess.check_output(['wslpath', '-w', runner], text=True).strip()

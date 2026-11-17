@@ -4,7 +4,8 @@ import { parseReservation } from './reservations.ts';
 export const DIRECT_STORE = 'transactions';
 export const SPONSORED_STORE = 'sponsored';
 export const BATCH_STORE = 'batch';
-const STORES = [DIRECT_STORE, SPONSORED_STORE, BATCH_STORE];
+export const ORDER_STORE = 'orders';
+const STORES = [DIRECT_STORE, SPONSORED_STORE, BATCH_STORE, ORDER_STORE];
 const MAX_RECORDS = 128;
 
 async function open(): Promise<IDBDatabase> {
@@ -20,7 +21,7 @@ async function open(): Promise<IDBDatabase> {
         reject(Error(message));
       }
     };
-    const request = indexedDB.open('streak-direct-transactions-v1', 3);
+    const request = indexedDB.open('streak-direct-transactions-v1', 4);
     request.onupgradeneeded = () => {
       for (const store of STORES)
         if (!request.result.objectStoreNames.contains(store))

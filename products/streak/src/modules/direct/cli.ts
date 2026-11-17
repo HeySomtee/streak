@@ -1,4 +1,5 @@
 import * as ccc from '@ckb-ccc/core';
+import { orderConfig } from './order-config';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import {
@@ -8,6 +9,7 @@ import {
   PUBLIC_DIRECT_CONFIG,
   V3_DIRECT_CONFIG,
   V4_DIRECT_CONFIG,
+  V5_DIRECT_CONFIG,
   LEGACY_DIRECT_CONFIG,
   protocolConfigFor,
   type DirectProtocolConfig,
@@ -175,7 +177,7 @@ export interface OperatorDeployment {
 /** A deployment spends from the same wallet but is not a fabricated football market. */
 export function loadOperatorDeployment(
   journal: OperatorJournal,
-  generation: 'v2' | 'v3' | 'v4' = 'v2',
+  generation: 'v2' | 'v3' | 'v4' | 'v5' = 'v2',
 ): OperatorDeployment | undefined {
   const path = join(journal.directory, `deployment-${generation}.json`);
   if (!existsSync(path)) return undefined;
@@ -184,11 +186,13 @@ export function loadOperatorDeployment(
   const row = object(JSON.parse(readFileSync(path, 'utf8')), 'operator deployment');
   if (
     row.protocolHash !==
-      (generation === 'v4'
-        ? V4_DIRECT_CONFIG.protocolHash
-        : generation === 'v3'
-          ? V3_DIRECT_CONFIG.protocolHash
-          : (journal.config?.protocolHash ?? PUBLIC_DIRECT_CONFIG.protocolHash)) ||
+      (generation === 'v5'
+        ? V5_DIRECT_CONFIG.protocolHash
+        : generation === 'v4'
+          ? V4_DIRECT_CONFIG.protocolHash
+          : generation === 'v3'
+            ? V3_DIRECT_CONFIG.protocolHash
+            : (journal.config?.protocolHash ?? PUBLIC_DIRECT_CONFIG.protocolHash)) ||
     typeof row.transactionHash !== 'string' ||
     !/^0x[0-9a-f]{64}$/.test(row.transactionHash) ||
     typeof row.signedTransaction !== 'string' ||
@@ -206,7 +210,9 @@ export function loadOperatorDeployment(
     tx.outputs.length > 64 ||
     tx.toBytes().length > 1_000_000 ||
     !tx.witnesses.length ||
-    !tx.outputsData.some((data) => ccc.hashCkb(data) === row.protocolHash)
+    !tx.outputsData.some((data) => ccc.hashCkb(data) === row.protocolHash) ||
+    (generation === 'v5' &&
+      ccc.hashCkb(tx.outputsData[0] ?? '0x') !== V5_DIRECT_CONFIG.protocolHash)
   )
     throw Error('Operator deployment bytes do not match the pinned protocol and hash');
   return {
@@ -233,6 +239,7 @@ export async function operatorFundingBarrier(
     loadOperatorDeployment(journal),
     loadOperatorDeployment(journal, 'v3'),
     loadOperatorDeployment(journal, 'v4'),
+    loadOperatorDeployment(journal, 'v5'),
   ].filter((value): value is OperatorDeployment => !!value)) {
     const state = await reconcileOperation(client, deployment);
     if (state.status !== 'committed' || (state.confirmations ?? 0) < 4)
@@ -366,6 +373,7 @@ export function assertFreshOperatorInputs(
     loadOperatorDeployment(journal),
     loadOperatorDeployment(journal, 'v3'),
     loadOperatorDeployment(journal, 'v4'),
+    loadOperatorDeployment(journal, 'v5'),
   ].filter((value): value is OperatorDeployment => !!value);
   if (
     deployments.some((deployment) =>
@@ -416,8 +424,9 @@ export async function runOperator(
   if (
     !allowed.includes(command) ||
     !/^(?:api-football-)?[1-9][0-9]{0,14}$/.test(rawId ?? '') ||
-    options.some((option) => option !== '--broadcast') ||
-    options.length > 1
+    options.some((option) => !['--broadcast', '--queued'].includes(option)) ||
+    options.length > 2 ||
+    new Set(options).size !== options.length
   )
     throw Error(
       'Usage: direct-operator.cjs create|observe|report|settle|void|status|reconcile FIXTURE_ID [--broadcast]',
@@ -440,6 +449,18 @@ export async function runOperator(
       'Hosted operation requires durable-volume confirmation through STREAK_DIRECT_DURABLE_STATE_ACK=1; ephemeral storage is unsupported',
     );
   const legacyRegistry = new DirectRegistry(registryDir);
+  const queued =
+    options.includes('--queued') || options_.record?.type.codeHash === orderConfig().protocolHash;
+  const queuedConfig = orderConfig();
+  const queuedDirectory = process.env.STREAK_ORDER_REGISTRY_DIR;
+  if (
+    queued &&
+    (!queuedDirectory || !isAbsolute(queuedDirectory) || queuedConfig.codeDeps.length !== 2)
+  )
+    throw Error('Queued-market deployment and separate registry are required.');
+  const queuedRegistry = queuedDirectory
+    ? new DirectRegistry(queuedDirectory, queuedConfig)
+    : undefined;
   const batchDirectory = process.env.STREAK_DIRECT_BATCH_REGISTRY_DIR;
   if (
     batchDirectory &&
@@ -454,8 +475,14 @@ export async function runOperator(
     legacyRegistry.publicationTargets = [batchRegistry];
     batchRegistry.publicationTargets = [legacyRegistry];
   }
-  const registry =
-    options_.record?.type.codeHash === V4_DIRECT_CONFIG.protocolHash
+  if (queuedRegistry) {
+    queuedRegistry.publicationTargets = [legacyRegistry, ...(batchRegistry ? [batchRegistry] : [])];
+    legacyRegistry.publicationTargets.push(queuedRegistry);
+    batchRegistry?.publicationTargets.push(queuedRegistry);
+  }
+  const registry = queued
+    ? queuedRegistry!
+    : options_.record?.type.codeHash === V4_DIRECT_CONFIG.protocolHash
       ? (batchRegistry ?? legacyRegistry)
       : legacyRegistry;
   const journal = new OperatorJournal(stateDir);
@@ -472,9 +499,19 @@ export async function runOperator(
       journal.load(operationKey('create', fixtureId))?.descriptor;
     if (record && record.fixtureId !== fixtureId)
       throw Error('Requested operator record has another fixture');
-    await verifyDeployment(client, record ? protocolConfigFor(record) : PUBLIC_DIRECT_CONFIG);
+    const config = queued
+      ? queuedConfig
+      : record
+        ? protocolConfigFor(record)
+        : PUBLIC_DIRECT_CONFIG;
+    await verifyDeployment(client, config);
     const keyFor = (action: OperatorAction) =>
-      operationKey(action, fixtureId, record?.type.codeHash, record?.creationTxHash);
+      operationKey(
+        action,
+        fixtureId,
+        record?.type.codeHash ?? config.protocolHash,
+        record?.creationTxHash,
+      );
     if (command === 'reconcile') {
       const states = [];
       for (const action of ['create', 'report', 'close'] as const) {
@@ -582,13 +619,19 @@ export async function runOperator(
       const signer = new ccc.SignerCkbPrivateKey(client, key);
       let tx: ccc.Transaction;
       if (action === 'create') {
+        if (!queued && queuedRegistry?.get(fixtureId))
+          throw Error('This fixture uses queued payments. Preserve its existing market.');
         const fixture = validateScheduledFixture(
           await fixturePayload(providerFixtureId),
           providerFixtureId,
           Date.now(),
         );
         if (options_.expectedFixture) verifyProvisionFixture(fixture, options_.expectedFixture);
-        const prepared = await buildCreate(client, signer, fixture);
+        if (queued && (legacyRegistry.get(fixtureId) || batchRegistry?.get(fixtureId)))
+          throw Error(
+            'Keep existing market generations. Choose an uncreated fixture for queued payments.',
+          );
+        const prepared = await buildCreate(client, signer, fixture, Date.now(), config);
         record = prepared.record;
         tx = prepared.tx;
       } else {
@@ -600,9 +643,16 @@ export async function runOperator(
               'First result observation saved. Run report again after at least 30 seconds.',
             );
           freshEvidence = evidence;
-          tx = await buildReport(client, signer, record, evidence);
+          tx = await buildReport(client, signer, record, evidence, Date.now(), config);
         } else
-          tx = await buildClose(client, signer, record, command === 'void' ? 'void' : 'settle');
+          tx = await buildClose(
+            client,
+            signer,
+            record,
+            command === 'void' ? 'void' : 'settle',
+            Date.now(),
+            config,
+          );
       }
       assertFreshOperatorInputs(journal, tx);
       const signed = await signer.signTransaction(tx);

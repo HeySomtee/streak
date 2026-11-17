@@ -11,7 +11,7 @@ async function main() {
   const { build } = await import('vite');
   const { ccc } = await import('@ckb-ccc/core');
   const { batchChain } = await import('./batch-browser-fixture.mjs');
-  const { BATCH_MANIFEST } = await import('../web/src/features/direct/protocol.ts');
+  const { BATCH_MANIFEST, MANIFEST } = await import('../web/src/features/direct/protocol.ts');
   const { sponsoredChain } = await import('./sponsored-browser-fixture.mjs');
   const { SponsoredClient } = await import('../web/src/features/direct/sponsored-client.ts');
   const { attachBatchRpc, batchOwnerKey } = await import('./batch-browser-fixture.mjs');
@@ -157,6 +157,7 @@ async function main() {
             return route.abort();
           }
           if (url.pathname === '/api/me') return json({ user: account });
+          if (url.pathname === '/api/direct/config') return json(MANIFEST);
           if (url.pathname === '/api/direct/batch/config') return json(BATCH_MANIFEST);
           if (url.pathname === '/api/direct/batch/demand') {
             if (holdDemand) {
@@ -336,7 +337,7 @@ async function main() {
         const migration = await page.evaluate(
           async () =>
             new Promise((resolve, reject) => {
-              const request = indexedDB.open('streak-direct-transactions-v1', 3);
+              const request = indexedDB.open('streak-direct-transactions-v1');
               request.onerror = () => reject(request.error);
               request.onsuccess = () => {
                 const db = request.result,
@@ -353,8 +354,9 @@ async function main() {
               };
             }),
         );
-        assert.equal(migration.version, 3);
+        assert.equal(migration.version, 4);
         assert.ok(migration.stores.includes('batch'));
+        assert.ok(migration.stores.includes('orders'));
         assert.equal(migration.rows[0].ownerSignedBytes, oldRecord.ownerSignedBytes);
         phase = `${name} ${width} review`;
         await page.getByRole('button', { name: 'Review all predictions', exact: true }).click();

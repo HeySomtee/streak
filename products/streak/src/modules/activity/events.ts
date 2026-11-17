@@ -22,6 +22,7 @@ export interface ActivityPublicEvent {
     ownerHash: string;
     position: ActivityPosition;
   }>;
+  order?: { offerId: string; fundingHash: string; revision?: number };
 }
 export interface ActivityEventBatch {
   events: ActivityPublicEvent[];
@@ -69,6 +70,8 @@ export function parseActivityEvent(value: unknown): ActivityPublicEvent {
       'uncertain',
       'broadcast',
       'broadcast-unknown',
+      'refunded',
+      'failed',
     ].includes(String(row.state)) ||
     typeof row.observedAt !== 'number' ||
     !Number.isSafeInteger(row.observedAt) ||
@@ -104,6 +107,20 @@ export function parseActivityEvent(value: unknown): ActivityPublicEvent {
   }
   if (row.sourceRevision !== undefined)
     event.sourceRevision = hash32(row.sourceRevision, 'activity source revision');
+  if (row.order !== undefined) {
+    const order = object(row.order, 'queued payment');
+    if (typeof order.offerId !== 'string' || !/^[0-9a-f-]{36}$/.test(order.offerId))
+      throw Error('Invalid order observation');
+    event.order = {
+      offerId: order.offerId,
+      fundingHash: hash32(order.fundingHash, 'order funding'),
+    };
+    if (order.revision !== undefined) {
+      if (!Number.isSafeInteger(order.revision) || Number(order.revision) < 1)
+        throw Error('Invalid order observation revision');
+      event.order.revision = Number(order.revision);
+    }
+  }
   if (row.ownerHash !== undefined) event.ownerHash = hash32(row.ownerHash, 'activity owner');
   if (row.positions !== undefined) {
     if (!Array.isArray(row.positions) || row.positions.length < 1 || row.positions.length > 8)

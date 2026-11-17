@@ -107,6 +107,7 @@ export interface CampaignSummary {
   qualifyingFixtureIds?: string[];
   predictionEntryPolicy?: CampaignPredictionEntryPolicy | null;
   pendingFixtureIds?: string[];
+  unsuccessfulEntries?: Array<{ fixtureId: string; outcome: 'refunded' | 'failed' }>;
 }
 export interface CampaignOwnEntry {
   publicId: string;

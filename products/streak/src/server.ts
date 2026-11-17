@@ -18,6 +18,7 @@ import { DirectRegistry, PUBLIC_DIRECT_CONFIG, LEGACY_DIRECT_CONFIG, V3_DIRECT_C
 import { telegramAvailable } from './modules/identity/integration-config';
 import { readProvisioningProgress, PROVISION_QUEUE_LIMIT } from './modules/direct/provision';
 import { sponsorProxy, SponsorProxyError } from './modules/direct/sponsor-proxy';
+import { orderConfig } from './modules/direct/order-config';
 import { activePoolRecord, PublicPoolCache } from './modules/direct/pools';
 import { activityService, activityOwner, startActivity, unavailableActivity } from './modules/activity/runtime';
 import { validActivityCursor } from './modules/activity/storage';
@@ -27,7 +28,7 @@ import { SurvivorError } from './modules/survivor/domain';
 import { fiveService, startFiveProgression } from './modules/five/runtime';
 import { FiveError } from './modules/five/domain';
 import { campaignService, campaignEntryPayments, campaignPaymentsEnabled, reconcileCampaigns, startCampaigns } from './modules/campaigns/runtime';
-import { entryPaymentOffer } from './modules/campaigns/entry-payments';
+import { entryPaymentOffer, orderEntryOffer, regularOnlySelection } from './modules/campaigns/entry-payments';
 import { CampaignError, identifier as campaignId, object as campaignObject } from './modules/campaigns/domain';
 import { campaignEvidenceExport, campaignEvidenceCsv } from './modules/campaigns/evidence';
 import { verifyCampaignPayout } from './modules/campaigns/payout-proof';
@@ -119,12 +120,14 @@ function isActiveProviderMatch(match: Match): boolean {
 
 const statusCache = new AsyncSnapshotCache<string, ProviderStatus>(5_000, 1);
 function providerStatus(): ProviderStatus {
-  return statusCache.read(provider.id, () => provider.status()).value ?? {
+  return (
+    statusCache.read(provider.id, () => provider.status()).value ?? {
     provider: provider.id,
     league: provider.id === "football" ? "Top Football" : provider.id === "dummy" ? "Premier League" : "FIFA World Cup 2026",
     enabled: false, simulated: provider.id === "dummy", source: "initializing", base: "",
     detail: "Refreshing the fixture feed", matchCount: 0, liveMatches: 0, finishedMatches: 0,
-  };
+    }
+  );
 }
 
 // ── HTTP helpers ────────────────────────────────────────────────────────────
@@ -154,7 +157,7 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const headers: Record<string, string> = {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
-    "Vary": "Accept-Encoding",
+    Vary: 'Accept-Encoding',
   };
   if (json.length > 2_048 && acceptsGzip(res.req)) {
     gzip(json, (error, compressed) => {
@@ -206,8 +209,8 @@ let wakeWithdrawalWork = () => {};
 async function handleSurvivor(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
   try {
     const mode = requestGameMode(req, url);
-    const id = await currentUserId(req);
-    const user = id ? await read(db => db.users.find(user => user.id === id)) : undefined;
+  const id = await currentUserId(req);
+    const user = id ? await read((db) => db.users.find((user) => user.id === id)) : undefined;
     const actor = user?.wallet?.address ? { id: user.id, name: user.username || 'Player', wallet: user.wallet.address } : null;
     const controls = mode === 'test' ? await testGames() : null;
     const service = controls ? controls.survivor : survivorService();
@@ -229,8 +232,8 @@ async function handleSurvivor(req: IncomingMessage, res: ServerResponse, url: UR
 async function handleFive(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
   try {
     const mode = requestGameMode(req, url);
-    const id = await currentUserId(req);
-    const user = id ? await read(db => db.users.find(user => user.id === id)) : undefined;
+  const id = await currentUserId(req);
+    const user = id ? await read((db) => db.users.find((user) => user.id === id)) : undefined;
     const actor = user?.wallet?.address ? { id: user.id, name: user.username || 'Player', wallet: user.wallet.address } : null;
     const controls = mode === 'test' ? await testGames() : null;
     const service = controls ? controls.five : fiveService();
@@ -271,7 +274,7 @@ async function handleCampaigns(req: IncomingMessage, res: ServerResponse, url: U
   try {
     if (localGameMode(req) !== 'api') throw new CampaignError('Competitions use regular API gameweeks. Use a labelled rehearsal competition with your test accounts.', 409);
     const userId = await currentUserId(req);
-    const user = userId ? await read(db => db.users.find(u => u.id === userId)) : undefined;
+    const user = userId ? await read((db) => db.users.find((u) => u.id === userId)) : undefined;
     const wallet = user?.wallet?.address;
     const actor = user && wallet ? { id: user.id, name: user.username || 'Player', wallet,
       ownerHash: (await activityOwner(wallet)).ownerHash } : null;
@@ -350,7 +353,11 @@ async function handleCampaigns(req: IncomingMessage, res: ServerResponse, url: U
 const compress = promisify(gzip);
 const assetCache = new Map<string, { stamp: string; body: Promise<Buffer>; gzip?: Promise<Buffer> }>();
 
-async function serveStatic(req: IncomingMessage, res: ServerResponse, pathname: string): Promise<void> {
+async function serveStatic(
+  req: IncomingMessage,
+  res: ServerResponse,
+  pathname: string,
+): Promise<void> {
   const isWelcome = pathname === "/" || pathname === "/welcome" || pathname === "/welcome/";
   if (isWelcome || pathname === "/season" || pathname.startsWith("/season/")) {
     res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; frame-src https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
@@ -388,8 +395,8 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, pathname: 
     const headers: Record<string, string> = {
       "Content-Type": MIME[extname(filePath)] ?? "application/octet-stream",
       "Cache-Control": "no-cache",
-      "ETag": etag,
-      "Vary": "Accept-Encoding",
+      ETag: etag,
+      Vary: 'Accept-Encoding',
     };
     if (req.headers["if-none-match"]?.split(",").map((tag) => tag.trim()).includes(etag)) {
       res.writeHead(304, headers).end();
@@ -432,7 +439,7 @@ async function handleAuthNonce(req: IncomingMessage, res: ServerResponse): Promi
 }
 
 async function handleAuthVerify(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const body = await readJson(req);
+      const body=await readJson(req);
   const address = await canonicalWalletAddress(body.address);
   const signature = signatureFrom(body.signature);
   if (!address || !signature || typeof body.challengeId !== "string") {
@@ -445,7 +452,7 @@ async function handleAuthVerify(req: IncomingMessage, res: ServerResponse): Prom
   const ok = await verifyWalletSignature(message, signature);
   if (!ok) return sendJson(res, 401, { error: "Signature verification failed." });
 
-  if (!await walletAddressMatches(address, signature)) return sendJson(res, 401, { error: "The signature does not control this CKB testnet address." });
+  if (!(await walletAddressMatches(address, signature))) return sendJson(res, 401, { error: "The signature does not control this CKB testnet address." });
   const identity = signature.identity;
   const walletType = signature.signType;
   if (!identity) return sendJson(res, 400, { error: "Signature is missing an identity." });
@@ -482,7 +489,6 @@ async function handleAuthVerify(req: IncomingMessage, res: ServerResponse): Prom
     }
     return { user: u, created };
   });
-
   await destroySession(parseCookies(req)[SESSION_COOKIE]);
   const token = await createSession(user.id);
   setSessionCookie(res, token);
@@ -570,9 +576,12 @@ export async function configureTelegramWebhook(options: {
   }
 }
 async function handleMe(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const user = await requireUser(req, res);
-  if (!user) return;
-  sendJson(res, 200, { user: { ...await toPublicUser(user), telegramAvailable: telegramAvailable(process.env, telegramReceiverReady) } });
+  const user=await requireUser(req,res); if(!user)return;
+  sendJson(res, 200, {
+    user: {
+      ...(await toPublicUser(user)), telegramAvailable: telegramAvailable(process.env, telegramReceiverReady),
+    },
+  });
 }
 
 async function handleSetNotify(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -626,8 +635,7 @@ async function handleTelegramConnect(req: IncomingMessage, res: ServerResponse):
 }
 
 async function handleTelegramDisconnect(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const user = await requireUser(req, res);
-  if (!user) return;
+  const user=await requireUser(req,res); if(!user)return;
   await (await import("./store")).update((db) => {
     const u = db.users.find((x) => x.id === user.id);
     if (!u) return;
@@ -635,7 +643,11 @@ async function handleTelegramDisconnect(req: IncomingMessage, res: ServerRespons
     delete u.telegramUsername;
   });
   const fresh = await read((db) => db.users.find((x) => x.id === user.id))!;
-  sendJson(res, 200, { user: { ...await toPublicUser(fresh!), telegramAvailable: telegramAvailable(process.env, telegramReceiverReady) } });
+  sendJson(res, 200, {
+    user: {
+      ...(await toPublicUser(fresh!)), telegramAvailable: telegramAvailable(process.env, telegramReceiverReady),
+    },
+  });
 }
 
 async function handleTelegramWebhook(req: IncomingMessage, res: ServerResponse, secret: string): Promise<void> {
@@ -777,7 +789,7 @@ async function handleMarkets(req: IncomingMessage, res: ServerResponse, url: URL
     competitionId: seasonCatalogue ? undefined : competitionId,
     matchFilter: isActiveProviderMatch,
   });
-  if (url.searchParams.has("limit")) {
+  if (url.searchParams.has('limit')) {
     const limit = Number(url.searchParams.get("limit"));
     const offset = Number(url.searchParams.get("offset") ?? "0");
     const query = (url.searchParams.get("q") ?? "").trim().toLowerCase();
@@ -791,19 +803,51 @@ async function handleMarkets(req: IncomingMessage, res: ServerResponse, url: URL
       return sendJson(res, 400, { error: "Invalid fixture date range." });
     // Schedule-only rows never create pools or enter settlement. Keep completed
     // and postponed fixtures visible even if the app never opened their market.
-    const known = new Set(markets.map(m => m.match.id));
+    const known = new Set(markets.map((m) => m.match.id));
     const schedule = seasonCatalogue
-      ? (provider.scheduleFixtures?.() ?? []).filter(match => !known.has(match.id) &&
-          (!matchId || match.id === matchId)).map(match => ({
+      ? (provider.scheduleFixtures?.() ?? [])
+          .filter((match) => !known.has(match.id) && (!matchId || match.id === matchId))
+          .map((match) => ({
           id: `fixture:${match.id}`, available: false, status: 'closed', fixtureStatus: match.status,
           match: { ...match, label: `${match.home.name} vs ${match.away.name}` },
           prices: null, totalPoolCkb: null, totalBets: null,
-        })) : [];
+          }))
+      : [];
     const allRows = [...markets, ...schedule];
-    const competitions = [...new Map(allRows.flatMap(row => row.match.competition ? [[row.match.competition.id, { id: row.match.competition.id, name: row.match.competition.name }] as const] : [])).values()].sort((a, b) => a.name.localeCompare(b.name));
-    const catalogue = allRows.filter(row => (!competitionId || row.match.competition?.id === competitionId) && (!seasonCatalogue || catalogueStatusMatches(row.match, status, Date.now()))).sort((a,b)=>a.match.kickoff.localeCompare(b.match.kickoff) || a.id.localeCompare(b.id));
-    const inWindow = start !== null && end !== null ? catalogue.filter(m => Date.parse(m.match.kickoff) >= start && Date.parse(m.match.kickoff) < end) : catalogue;
-    const filtered = query ? inWindow.filter(m => `${m.match.home.name} ${m.match.away.name} ${m.match.competition?.name ?? ""}`.toLowerCase().includes(query)) : inWindow;
+    const competitions = [
+      ...new Map(
+        allRows.flatMap((row) =>
+          row.match.competition
+            ? [
+                [
+                  row.match.competition.id,
+                  { id: row.match.competition.id, name: row.match.competition.name },
+                ] as const,
+              ]
+            : [],
+        ),
+      ).values(),
+    ].sort((a, b) => a.name.localeCompare(b.name));
+    const catalogue = allRows
+      .filter(
+        (row) =>
+          (!competitionId || row.match.competition?.id === competitionId) &&
+          (!seasonCatalogue || catalogueStatusMatches(row.match, status, Date.now())),
+      )
+      .sort((a, b) => a.match.kickoff.localeCompare(b.match.kickoff) || a.id.localeCompare(b.id));
+    const inWindow =
+      start !== null && end !== null
+        ? catalogue.filter(
+            (m) => Date.parse(m.match.kickoff) >= start && Date.parse(m.match.kickoff) < end,
+          )
+        : catalogue;
+    const filtered = query
+      ? inWindow.filter((m) =>
+          `${m.match.home.name} ${m.match.away.name} ${m.match.competition?.name ?? ''}`
+            .toLowerCase()
+            .includes(query),
+        )
+      : inWindow;
     const ordered = sort === 'featured' ? rankFeaturedFixtures(filtered) : filtered;
     const page = ordered.slice(offset, offset+limit);
     return sendJson(res, 200, { markets: page, total: filtered.length, nextOffset: offset+limit < filtered.length ? offset+limit : null,
@@ -820,7 +864,9 @@ async function handleMarketDetail(req: IncomingMessage, res: ServerResponse, id:
 }
 
 async function handlePublicPredictionMarket(res: ServerResponse, id: string): Promise<void> {
-  const detail = await read(db => findPublicPredictionMarket(db, id, match => provider.ownsMatch?.(match) === true, Date.now()));
+  const detail = await read((db) =>
+    findPublicPredictionMarket(db, id, (match) => provider.ownsMatch?.(match) === true, Date.now()),
+  );
   sendJson(res, detail ? 200 : 404, detail ?? { error: 'Market not found.' });
 }
 
@@ -830,8 +876,10 @@ async function handleSlipReview(req: IncomingMessage, res: ServerResponse): Prom
   catch { return sendJson(res, 400, { error: 'Invalid prediction draft.' }); }
   try {
     const input = parseSlip(body);
-    const result = await read(db => reviewPredictions(db, input, match => provider.ownsMatch?.(match) === true, Date.now()));
-    sendJson(res, 200, result);
+    const result = await read((db) =>
+      reviewPredictions(db, input, (match) => provider.ownsMatch?.(match) === true, Date.now()),
+    );
+    sendJson(res,200,result);
   } catch (error) {
     if (error instanceof InvalidSlip) return sendJson(res, 400, { error: error.message });
     throw error;
@@ -1313,6 +1361,10 @@ type Handler = (req: IncomingMessage, res: ServerResponse, url: URL) => Promise<
 const directRegistry = new DirectRegistry(process.env.STREAK_DIRECT_REGISTRY_DIR);
 const legacyDirectRegistry = new DirectRegistry(process.env.STREAK_DIRECT_LEGACY_REGISTRY_DIR);
 const batchDirectRegistry = new DirectRegistry(process.env.STREAK_DIRECT_BATCH_REGISTRY_DIR,V4_DIRECT_CONFIG);
+const orderDirectRegistry = new DirectRegistry(
+  process.env.STREAK_ORDER_REGISTRY_DIR,
+  orderConfig(),
+);
 const publicPools = new PublicPoolCache();
 const atomicConfigured = !!process.env.STREAK_DIRECT_BATCH_REGISTRY_DIR && V4_DIRECT_CONFIG.codeDeps.length===2;
 const sponsorConfigurationCache=new AsyncSnapshotCache<string,unknown>(5_000,2);
@@ -1324,13 +1376,32 @@ function sponsorRate(key:string,limit:number):boolean {
   if(!value){if(sponsorRequests.size>=256)return false;value={start:now,count:0};sponsorRequests.set(key,value);}
   value.count++;return value.count<=limit;
 }
-async function handleDemand(req:IncomingMessage,res:ServerResponse,url:URL,atomic=false):Promise<void> {
+async function handleDemand(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  atomic = false,
+): Promise<void> {
   const id=url.searchParams.get('matchId');
   if(id&&!/^api-football-[1-9][0-9]{0,14}$/.test(id))return sendJson(res,400,{error:'An API football fixture is required.'});
-  const envelope=(fixtures:unknown[],enabled=true,unavailableReason?:string)=>atomic?{fixtures,serverTime:Date.now(),enabled,...unavailableReason?{unavailableReason}:{}}:{fixtures};
+  const envelope = (fixtures: unknown[], enabled = true, unavailableReason?: string) =>
+    atomic
+      ? {
+          fixtures,serverTime:Date.now(),
+          enabled,
+          ...(unavailableReason ? { unavailableReason } : {}),
+        }
+      : { fixtures };
   if(atomic&&!atomicConfigured)return sendJson(res,200,envelope([],false,'Atomic payment is awaiting verified deployment and operator activation.'));
-  const status=providerStatus();
-  const fixtures=(provider.scheduleFixtures?.()??[]).filter(match=>(!id||match.id===id)&&isActiveProviderMatch(match)&&match.status==='scheduled'&&match.oracle?.source===PROVIDER_ORIGIN&&Date.parse(match.kickoff)>Date.now()+120_000);
+  const status = providerStatus();
+  const fixtures = (provider.scheduleFixtures?.() ?? []).filter(
+    (match) =>
+      (!id || match.id === id) &&
+      isActiveProviderMatch(match) &&
+      match.status === 'scheduled' &&
+      match.oracle?.source === PROVIDER_ORIGIN &&
+      Date.parse(match.kickoff) > Date.now() + 120_000,
+  );
   if(provider.id!=='football'||!status.enabled||status.simulated||!fixtures.length)
     return sendJson(res,200,envelope([],false,'The real football catalogue is not ready.'));
   if(fixtures.length>4096)return sendJson(res,503,{error:'The active fixture catalogue exceeds its reviewed bound.'});
@@ -1341,23 +1412,62 @@ async function handleDemand(req:IncomingMessage,res:ServerResponse,url:URL,atomi
       await within(sponsorConfigurationCache.refresh(cacheKey,()=>sponsorProxy(`${prefix}/configuration`)),8_000),'sponsor configuration');
     const lock=object(config.sponsorLock,'sponsor lock');
     if(typeof lock.codeHash!=='string'||!/^0x[0-9a-f]{64}$/.test(lock.codeHash)||!['type','data','data1','data2'].includes(String(lock.hashType))||typeof lock.args!=='string'||!/^0x(?:[0-9a-f]{2}){1,59}$/.test(lock.args))throw Error('Invalid sponsor lock');
-    const reservations=Array.isArray(config.reservations)?config.reservations.map(value=>object(value,'sponsor reservation')):[];
+    const reservations = Array.isArray(config.reservations)
+      ? config.reservations.map((value) => object(value, 'sponsor reservation'))
+      : [];
     if(reservations.length>4096)throw Error('Sponsor reservations exceed their bound');
-    const retired=atomic&&Array.isArray(config.retiredCreations)?config.retiredCreations.map(value=>object(value,'retired creation')):[];
-    if(retired.length>256||retired.some(row=>typeof row.fixtureId!=='string'||!/^api-football-[1-9][0-9]{0,14}$/.test(row.fixtureId)||typeof row.creationTxHash!=='string'||!/^0x[0-9a-f]{64}$/.test(row.creationTxHash)))throw Error('Invalid retired atomic selection');
-    const descriptors=new Map((atomic?batchDirectRegistry:directRegistry).describe(fixtures,()=>true,id??undefined).filter(row=>row.type.codeHash!==LEGACY_DIRECT_CONFIG.protocolHash&&!retired.some(old=>old.fixtureId===row.fixtureId&&old.creationTxHash===row.creationTxHash)).map(row=>[row.fixtureId,row]));
-    const output=fixtures.map(match=>{
+    const retired =
+      atomic && Array.isArray(config.retiredCreations)
+        ? config.retiredCreations.map((value) => object(value, 'retired creation'))
+        : [];
+    if (
+      retired.length > 256 ||
+      retired.some(
+        (row) =>
+          typeof row.fixtureId !== 'string' ||
+          !/^api-football-[1-9][0-9]{0,14}$/.test(row.fixtureId) ||
+          typeof row.creationTxHash !== 'string' ||
+          !/^0x[0-9a-f]{64}$/.test(row.creationTxHash),
+      )
+    )throw Error('Invalid retired atomic selection');
+    const descriptors = new Map(
+      (atomic ? batchDirectRegistry : directRegistry)
+        .describe(fixtures, () => true, id ?? undefined)
+        .filter(
+          (row) =>
+            row.type.codeHash !== LEGACY_DIRECT_CONFIG.protocolHash &&
+            !retired.some(
+              (old) => old.fixtureId === row.fixtureId && old.creationTxHash === row.creationTxHash,
+            ),
+        )
+        .map((row) => [row.fixtureId, row]),
+    );
+    const output = fixtures.map((match) => {
       const cutoffMs=Date.parse(match.kickoff),terms={provider:'football' as const,providerFixtureId:match.oracle!.fixtureId,source:'api-football' as const,rules:'regulation-time-1x2-v1' as const,deadlineMs:cutoffMs+RESULT_WINDOW_MS};
       const base={fixtureId:match.id,label:`${match.home.name} vs ${match.away.name}`,cutoffMs,terms};
       const descriptor=descriptors.get(match.id);
       const reservation=reservations.find(value=>value.fixtureId===match.id);
-      return {...base,termsHash:termsDigest({...base,id:'',creationTxHash:'',type:{codeHash:'',hashType:'data2',args:''}}),sponsorLock:{codeHash:lock.codeHash,hashType:lock.hashType,args:lock.args},
-        state:descriptor?(descriptor.entryEnabled?'funded':'unavailable'):reservation?.state==='unavailable'?'unavailable':reservation?.state==='confirming'?'confirming':reservation?.state==='reserved'?'reserved':(atomic?V4_DIRECT_CONFIG:V3_DIRECT_CONFIG).codeDeps.length===2?'available':'unavailable',
-        ...(descriptor?{descriptor}:{})};
+      return {
+        ...base,termsHash:termsDigest({...base,id:'',creationTxHash:'',type:{codeHash:'',hashType:'data2',args:''}}),sponsorLock:{codeHash:lock.codeHash,hashType:lock.hashType,args:lock.args},
+        state: descriptor
+          ? descriptor.entryEnabled
+            ? 'funded'
+            : 'unavailable'
+          : reservation?.state === 'unavailable'
+            ? 'unavailable'
+            : reservation?.state === 'confirming'
+              ? 'confirming'
+              : reservation?.state === 'reserved'
+                ? 'reserved'
+                : (atomic ? V4_DIRECT_CONFIG : V3_DIRECT_CONFIG).codeDeps.length === 2
+                  ? 'available'
+                  : 'unavailable',
+        ...(descriptor ? { descriptor } : {}),
+      };
     });
     sendJson(res,200,envelope(output));
+  } catch {atomic?sendJson(res,200,envelope([],false,'Atomic sponsorship is temporarily unavailable. Existing signed payments remain recoverable.')):sendJson(res,503,{error:'Sponsored market creation is temporarily unavailable. Existing positions remain recoverable.'});
   }
-  catch {atomic?sendJson(res,200,envelope([],false,'Atomic sponsorship is temporarily unavailable. Existing signed payments remain recoverable.')):sendJson(res,503,{error:'Sponsored market creation is temporarily unavailable. Existing positions remain recoverable.'});}
 }
 async function handleSponsor(req:IncomingMessage,res:ServerResponse,url:URL,action:'offer'|'submit'|'resume'|'resolve'|'status'|'release'|'cancel-review',atomic=false):Promise<void> {
   const prefix=atomic?'/batch':'';
@@ -1396,6 +1506,69 @@ async function handleSponsor(req:IncomingMessage,res:ServerResponse,url:URL,acti
   }
   catch(error) {sendJson(res,error instanceof SponsorProxyError || error instanceof CampaignError ?error.status:409,{error:error instanceof SponsorProxyError || error instanceof CampaignError ?error.message:'Sponsored operation could not complete. Preserve any signed transaction and check its status before retrying.',...(error instanceof SponsorProxyError && error.reviewWait ? {reviewWait:error.reviewWait} : {})});}
 }
+async function handleOrders(
+  req: IncomingMessage,
+  res: ServerResponse,
+  action: 'configuration' | 'wallet' | 'offer' | 'submit' | 'status' | 'cancel-review',
+): Promise<void> {
+  if (action === 'configuration') {
+    try {
+      return sendJson(res, 200, await sponsorProxy('/orders/configuration'));
+    } catch {
+      return sendJson(res, 200, { enabled: false });
+    }
+  }
+  const user=await requireUser(req,res); if(!user)return;
+  res.setHeader('Cache-Control','private, no-store');
+  if (
+    !sponsorRate(
+      `orders:${action}:${user.id}`,
+      action === 'wallet' || action === 'status' ? 60 : 12,
+    )
+  )
+    return sendJson(res, 429, { error: 'Please wait a moment before trying again.' });
+  const address=await canonicalWalletAddress(user.wallet.address);
+  if (!address) return sendJson(res, 403, { error: 'Use your verified testnet wallet.' });
+      const body=await readJson(req);
+  if (
+    !body ||
+    typeof body !== 'object' ||
+    Array.isArray(body) ||
+    JSON.stringify(body).length > 210_000
+  )
+    return sendJson(res, 400, { error: 'Invalid payment request.' });
+  try {
+    const payments = campaignPaymentsEnabled() ? campaignEntryPayments() : undefined;
+    const actor = { id: user.id, name: user.username || 'Player', wallet: address, ownerHash: (await activityOwner(address)).ownerHash,
+    };
+    if (action === 'offer' && !payments && !regularOnlySelection(body.competitionSelection, user.id)) throw new CampaignError('Competition entry is temporarily unavailable. Your picks are saved.', 503);
+    if (action === 'submit') await payments?.start(actor, body);
+    const result = await sponsorProxy(`/orders/${action}`, body, address);
+    if (action === 'cancel-review') await payments?.observeOrderCancellation(result);
+    if (action === 'offer') {
+      try {await payments?.reserve(actor, orderEntryOffer(result), body.competitionSelection);}
+      catch(error) {
+        // Never strand an unsigned input reservation when scoring metadata fails.
+        // If cancellation cannot be proven, its short lease remains conservative.
+        try {await sponsorProxy('/orders/cancel-review',{offerId:body.requestId},address);}
+        catch {console.warn('[orders] unsigned review cancellation awaits retry');}
+    throw error;
+      }
+    }
+    sendJson(res,200,result);
+  } catch (error) {
+    sendJson(
+      res,
+      error instanceof CampaignError || error instanceof SponsorProxyError ? error.status : 409,
+      {
+        error:
+          error instanceof CampaignError || error instanceof SponsorProxyError
+            ? error.message
+            : 'Payment processing could not be checked. Keep your saved payment and retry with the same identity.',
+      },
+    );
+  }
+}
 async function handleDirectMarkets(res: ServerResponse, url: URL): Promise<void> {
   const fixtureId = url.searchParams.get('matchId') ?? undefined;
   if (fixtureId !== undefined && !/^api-football-[1-9][0-9]{0,14}$/.test(fixtureId)) {
@@ -1404,7 +1577,7 @@ async function handleDirectMarkets(res: ServerResponse, url: URL): Promise<void>
     return sendJson(res, 400, { error: 'Invalid fixture identifier.' });
   }
   const status = providerStatus();
-  const markets = await read(db => {
+  const markets = await read((db) => {
     const fixtures = provider.scheduleFixtures?.() ?? db.matches;
     const current = directRegistry.describe(fixtures,
       match => provider.id === 'football' && status.enabled && !status.simulated && isActiveProviderMatch(match), fixtureId);
@@ -1412,7 +1585,27 @@ async function handleDirectMarkets(res: ServerResponse, url: URL): Promise<void>
       .filter(row => !current.some(active => active.id === row.id))
       .map(row => ({ ...row, entryEnabled: false, entryUnavailableReason: 'This earlier contract is closed to new entries. Existing positions and claims remain available.' }));
     const atomic = batchDirectRegistry.describe(fixtures,match=>provider.id==='football'&&status.enabled&&!status.simulated&&isActiveProviderMatch(match),fixtureId);
-    return [...atomic,...current.map(row=>atomicConfigured?{...row,entryEnabled:false,entryUnavailableReason:'New payments use the atomic slip. This earlier pool retains its positions and claim recovery.'}:row), ...archived];
+    const queued = orderDirectRegistry.describe(
+      fixtures,
+      (match) =>
+        provider.id === 'football' &&
+        status.enabled &&
+        !status.simulated &&
+        isActiveProviderMatch(match),
+      fixtureId,
+    );
+    return [
+      ...queued,
+      ...atomic,
+      ...current.map((row) =>
+        atomicConfigured
+          ? {
+              ...row,entryEnabled:false,entryUnavailableReason:'New payments use the atomic slip. This earlier pool retains its positions and claim recovery.',
+            }
+          : row,
+      ),
+      ...archived,
+    ];
   });
   sendJson(res, 200, { markets });
 }
@@ -1423,7 +1616,9 @@ async function handleDirectFixtures(res: ServerResponse): Promise<void> {
   const fixtures = provider.scheduleFixtures?.();
   if (provider.id !== 'football' || !status.enabled || status.simulated || !coverage || !fixtures)
     return sendJson(res, 503, { error: 'The real football schedule is not ready. Market creation will retry.' });
-  const owned = fixtures.filter(match => isActiveProviderMatch(match) && match.oracle?.source === PROVIDER_ORIGIN);
+  const owned = fixtures.filter(
+    (match) => isActiveProviderMatch(match) && match.oracle?.source === PROVIDER_ORIGIN,
+  );
   if (owned.length > PROVISION_QUEUE_LIMIT)
     return sendJson(res, 503, { error: 'The fixture catalogue exceeds the reviewed provisioning bound.' });
   sendJson(res, 200, { format: 'streak-direct-fixtures-v1', provider: 'football', source: PROVIDER_ORIGIN,
@@ -1460,18 +1655,46 @@ const staticRoutes: Record<string, Handler> = {
   "GET /api/activity": (req,res,url)=>handleActivity(req,res,url,'read'),
   "POST /api/activity/refresh": (req,res,url)=>handleActivity(req,res,url,'refresh'),
   "POST /api/activity/hint": (req,res,url)=>handleActivity(req,res,url,'hint'),
-  "GET /api/direct/pools": async (req,res,url) => {
+  'GET /api/direct/pools': async (req, res, url) => {
     const ids = (url.searchParams.get('fixtures') ?? '').split(',');
-    if (ids.length > 24 || new Set(ids).size !== ids.length || ids.some(id=>!/^api-football-[1-9][0-9]{0,14}$/.test(id))) return sendJson(res,400,{error:'Provide up to 24 unique football fixtures.'});
+    if (
+      ids.length > 24 ||
+      new Set(ids).size !== ids.length ||
+      ids.some((id) => !/^api-football-[1-9][0-9]{0,14}$/.test(id))
+    ) return sendJson(res,400,{error:'Provide up to 24 unique football fixtures.'});
     if (!sponsorRate(`pools:${req.socket.remoteAddress}`,120)) return sendJson(res,429,{error:'Please wait before refreshing pool shares.'});
-    return sendJson(res,200,{pools:ids.map(id=>publicPools.read(id,activePoolRecord(atomicConfigured,atomicConfigured ? batchDirectRegistry.get(id) : undefined,atomicConfigured ? undefined : directRegistry.get(id) ?? legacyDirectRegistry.get(id))))});
+    return sendJson(res, 200, {
+      pools: ids.map((id) =>
+        publicPools.read(
+          id,
+          orderDirectRegistry.get(id) ??
+            activePoolRecord(
+              atomicConfigured,
+              atomicConfigured ? batchDirectRegistry.get(id) : undefined,
+              atomicConfigured
+                ? undefined
+                : (directRegistry.get(id) ?? legacyDirectRegistry.get(id)),
+            ),
+        ),
+      ),
+    });
   },
-  "GET /api/direct/config": async (_req, res) => sendJson(res, 200, PUBLIC_DIRECT_CONFIG),
+  'GET /api/direct/config': async (_req, res) =>
+    sendJson(res, 200, {
+      ...PUBLIC_DIRECT_CONFIG,
+      ...(orderConfig().codeDeps.length ? { orderDeployment: orderConfig() } : {}),
+    }),
   "GET /api/direct/sponsor/config": async (_req,res) => sendJson(res,200,V3_DIRECT_CONFIG),
   "GET /api/direct/entry-mode": async (_req,res) => sendJson(res,200,{mode:atomicConfigured?'atomic':'legacy'}),
   "GET /api/direct/batch/config": async (_req,res) => sendJson(res,200,V4_DIRECT_CONFIG),
   "GET /api/direct/batch/demand": (req,res,url)=>handleDemand(req,res,url,true),
   "POST /api/direct/batch/offer": (req,res,url)=>handleSponsor(req,res,url,'offer',true),
+  'GET /api/direct/orders/configuration': (req, res) => handleOrders(req, res, 'configuration'),
+  'POST /api/direct/orders/wallet': (req, res) => handleOrders(req, res, 'wallet'),
+  'POST /api/direct/orders/offer': (req, res) => handleOrders(req, res, 'offer'),
+  'POST /api/direct/orders/submit': (req, res) => handleOrders(req, res, 'submit'),
+  'POST /api/direct/orders/status': (req, res) => handleOrders(req, res, 'status'),
+  'POST /api/direct/orders/cancel-review': (req, res) => handleOrders(req, res, 'cancel-review'),
   "POST /api/direct/batch/release": (req,res,url)=>handleSponsor(req,res,url,'release',true),
   "POST /api/direct/batch/cancel-review": (req,res,url)=>handleSponsor(req,res,url,'cancel-review',true),
   "POST /api/direct/batch/submit": (req,res,url)=>handleSponsor(req,res,url,'submit',true),

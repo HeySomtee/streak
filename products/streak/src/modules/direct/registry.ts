@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import * as ccc from '@ckb-ccc/core';
 import { sponsoredOriginDescendant } from './sponsor-lineage';
+import { ORDER_PROTOCOL_HASH } from '../../../shared/order-codec.mjs';
 import {
   closeSync,
   existsSync,
@@ -90,14 +91,23 @@ export const V4_DIRECT_CONFIG = Object.freeze({
   ],
 });
 
-export function directGeneration(protocolHash: string): '' | 'v2-' | 'v3-' | 'v4-' {
+/** Local build pin. Public activation requires verified deployment outpoints. */
+export const V5_DIRECT_CONFIG = Object.freeze({
+  ...PUBLIC_DIRECT_CONFIG,
+  protocolHash: ORDER_PROTOCOL_HASH,
+  codeDeps: [] as DirectProtocolConfig['codeDeps'],
+});
+
+export function directGeneration(protocolHash: string): '' | 'v2-' | 'v3-' | 'v4-' | 'v5-' {
   return protocolHash === LEGACY_DIRECT_CONFIG.protocolHash
     ? ''
-    : protocolHash === V4_DIRECT_CONFIG.protocolHash
-      ? 'v4-'
-      : protocolHash === V3_DIRECT_CONFIG.protocolHash
-        ? 'v3-'
-        : 'v2-';
+    : protocolHash === V5_DIRECT_CONFIG.protocolHash
+      ? 'v5-'
+      : protocolHash === V4_DIRECT_CONFIG.protocolHash
+        ? 'v4-'
+        : protocolHash === V3_DIRECT_CONFIG.protocolHash
+          ? 'v3-'
+          : 'v2-';
 }
 
 export function protocolConfigFor(
@@ -106,15 +116,20 @@ export function protocolConfigFor(
 ): DirectProtocolConfig {
   if (record.type.codeHash === config.protocolHash) return config;
   if (
-    [PUBLIC_DIRECT_CONFIG, LEGACY_DIRECT_CONFIG, V3_DIRECT_CONFIG, V4_DIRECT_CONFIG].includes(
-      config as typeof PUBLIC_DIRECT_CONFIG,
-    )
+    [
+      PUBLIC_DIRECT_CONFIG,
+      LEGACY_DIRECT_CONFIG,
+      V3_DIRECT_CONFIG,
+      V4_DIRECT_CONFIG,
+      V5_DIRECT_CONFIG,
+    ].includes(config as typeof PUBLIC_DIRECT_CONFIG)
   ) {
     const pinned = [
       PUBLIC_DIRECT_CONFIG,
       LEGACY_DIRECT_CONFIG,
       V3_DIRECT_CONFIG,
       V4_DIRECT_CONFIG,
+      V5_DIRECT_CONFIG,
     ].find((value) => value.protocolHash === record.type.codeHash);
     if (pinned) return pinned;
   }
@@ -376,7 +391,8 @@ export class DirectRegistry {
     }
     if (
       record.type.codeHash !== V3_DIRECT_CONFIG.protocolHash &&
-      record.type.codeHash !== V4_DIRECT_CONFIG.protocolHash
+      record.type.codeHash !== V4_DIRECT_CONFIG.protocolHash &&
+      record.type.codeHash !== V5_DIRECT_CONFIG.protocolHash
     )
       return this.add(record);
     if (!this.directory) throw Error('Direct market registry is not configured');
@@ -410,10 +426,11 @@ export class DirectRegistry {
     if (header?.hash !== response.blockHash || tip.number < response.blockNumber + 3n)
       throw Error('Canonical market publication needs four confirmations');
     const transaction = response.transaction;
-    const atomic = record.type.codeHash === V4_DIRECT_CONFIG.protocolHash;
+    const queued = record.type.codeHash === V5_DIRECT_CONFIG.protocolHash;
+    const atomic = record.type.codeHash === V4_DIRECT_CONFIG.protocolHash || queued;
     const base = atomic ? Buffer.from(record.type.args.slice(2), 'hex').readUInt32LE(32) : 0;
     if (
-      transaction.inputs.length < 2 ||
+      transaction.inputs.length < (queued ? 1 : 2) ||
       transaction.outputs[base]?.type?.toHex() !== ccc.Script.from(record.type).toHex() ||
       transaction.outputsData[base] !== '0x0000ff' ||
       (atomic

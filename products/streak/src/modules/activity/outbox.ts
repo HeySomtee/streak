@@ -14,6 +14,8 @@ import { join, relative } from 'node:path';
 import { OperatorJournal, OPERATION_FILE, operationKey } from '../direct/journal';
 import { sponsorStores, type SponsorJournal, type SponsorEntry } from '../direct/sponsor-journal';
 import { atomicOffer } from '../direct/batch';
+import { OrderStore } from '../direct/order-store';
+import { ORDER_PROTOCOL_HASH, decodeOrder } from '../../../shared/order-codec.mjs';
 import { parseShard } from '../direct/operator';
 import { object, writeExclusiveJson, hash32, protocolConfigFor } from '../direct/registry';
 import {
@@ -59,11 +61,17 @@ export class ActivityEventOutbox {
   private readonly pending: string;
   private readonly acknowledged: string;
   private readonly quarantine: string;
-  private readonly sources: Array<{ directory: string; store?: SponsorJournal }>;
+  private readonly sources: Array<{
+    directory: string;
+    store?: SponsorJournal;
+    orders?: OrderStore;
+  }>;
   private readonly seen = new Map<string, string>();
   private readonly paymentSources = new Map<string, string>();
   private sourceIndex = 0;
   private sourceDirectory?: Dir;
+  private pendingDirectory?: Dir;
+  private pendingFile?: string;
   constructor(readonly journal: OperatorJournal) {
     const directory = join(journal.directory, 'activity-outbox');
     this.pending = join(directory, 'pending');
@@ -75,12 +83,19 @@ export class ActivityEventOutbox {
     this.sources = [
       { directory: journal.directory },
       ...sponsorStores(journal.directory).map((store) => ({ directory: store.directory, store })),
+      {
+        directory: join(journal.directory, 'orders-v5'),
+        orders: new OrderStore(journal.directory, ORDER_PROTOCOL_HASH),
+      },
     ];
   }
   close(): void {
     this.sourceDirectory?.closeSync();
     this.sourceDirectory = undefined;
     this.sourceIndex = 0;
+    this.pendingDirectory?.closeSync();
+    this.pendingDirectory = undefined;
+    this.pendingFile = undefined;
   }
   private sourceIssue(path: string): void {
     // Keep source bytes exactly where financial recovery expects them. The marker
@@ -281,6 +296,91 @@ export class ActivityEventOutbox {
       positions,
     });
   }
+  private order(store: OrderStore, file: string): void {
+    const path = join(store.directory, file),
+      signature = stamp(path);
+    if (this.seen.get(path) === signature) return;
+    const row = store.load(file.slice(0, -5));
+    if (row?.signedBytes && (row.state === 'refunded' || row.state === 'failed')) {
+      this.emit({
+        version: 1,
+        kind: 'payment',
+        transactionHash:
+          row.state === 'failed'
+            ? row.conflictHash!
+            : ccc.Transaction.fromBytes(row.executionBytes!).hash(),
+        state: row.state,
+        observedAt: row.acceptedAt!,
+        descriptors: row.offer.markets.map(activityDescriptor),
+        ownerHash: decodeOrder(row.offer.orderData).owner.hash(),
+        order: {
+          offerId: row.offer.id,
+          fundingHash: row.offer.rawHash,
+          revision: row.observationRevision ?? 1,
+        },
+      });
+    } else if (row?.executionBytes && row.executionKind === 'admit') {
+      const tx = ccc.Transaction.fromBytes(row.executionBytes),
+        data = decodeOrder(row.offer.orderData),
+        ownerHash = data.owner.hash();
+      const descriptors = row.offer.markets.map(activityDescriptor);
+      this.emit({
+        version: 1,
+        kind: 'payment',
+        transactionHash: tx.hash(),
+        state: row.state === 'placed' ? 'funded' : 'confirming',
+        observedAt: row.acceptedAt!,
+        descriptors,
+        ownerHash,
+        order: {
+          offerId: row.offer.id,
+          fundingHash: row.offer.rawHash,
+          revision: row.observationRevision ?? 1,
+        },
+        positions: descriptors.map((descriptor, i) => {
+          const pending = parseShard(Buffer.from(ccc.bytesFrom(tx.outputsData[i]))).pending;
+          if (
+            !pending ||
+            pending.owner !== ownerHash ||
+            pending.outcome !== data.lines[i].outcome ||
+            pending.principal.toString() !== data.lines[i].principalShannons ||
+            !tx.outputs[i].type?.eq(descriptor.type)
+          )
+            throw Error('Queued execution differs from authorized predictions');
+          return {
+            descriptor,
+            ownerHash,
+            position: {
+              id: `submitted:${tx.hash()}:${i}`,
+              status: 'submitted',
+              outcome: data.lines[i].outcome,
+              principalShannons: data.lines[i].principalShannons,
+              storageShannons: '32100000000',
+              entitlementShannons: null,
+              outPoint: { txHash: tx.hash(), index: i },
+              transactionHash: tx.hash(),
+            },
+          };
+        }),
+      });
+    } else if (row?.signedBytes) {
+      this.emit({
+        version: 1,
+        kind: 'payment',
+        transactionHash: row.offer.rawHash,
+        state: 'confirming',
+        observedAt: row.acceptedAt!,
+        descriptors: row.offer.markets.map(activityDescriptor),
+        ownerHash: decodeOrder(row.offer.orderData).owner.hash(),
+        order: {
+          offerId: row.offer.id,
+          fundingHash: row.offer.rawHash,
+          revision: row.observationRevision ?? 1,
+        },
+      });
+    }
+    this.seen.set(path, signature);
+  }
   /** At most 256 source directory entries and 64 public events per request. */
   read(): ActivityEventBatch {
     let scanned = 0,
@@ -306,53 +406,76 @@ export class ActivityEventOutbox {
         if (!source.store && OPERATION_FILE.test(entry.name)) this.operator(entry.name);
         if (source.store && /^[0-9a-f-]{36}\.json$/.test(entry.name))
           this.sponsor(source.store, entry.name);
+        if (source.orders && /^[0-9a-f-]{36}\.json$/.test(entry.name))
+          this.order(source.orders, entry.name);
       } catch {
         this.sourceIssue(join(source.directory, entry.name));
       }
     }
-    const events: ActivityPublicEvent[] = [],
-      pending = opendirSync(this.pending);
+    const events: ActivityPublicEvent[] = [];
+    this.pendingDirectory ??= opendirSync(this.pending);
+    const pending = this.pendingDirectory;
     let hasMore = scanning,
       examined = 0,
       bytes = 0;
     try {
       for (;;) {
-        const item = pending.readSync();
-        if (!item) break;
-        // Crash-left acked files and unrelated entries must not make work unbounded.
-        if (++examined > ACTIVITY_EVENT_BATCH_LIMIT * 2) {
+        if (
+          events.length === ACTIVITY_EVENT_BATCH_LIMIT ||
+          examined >= ACTIVITY_EVENT_BATCH_LIMIT * 2
+        ) {
           hasMore = true;
           break;
         }
+        const item = this.pendingFile
+          ? { name: this.pendingFile, isFile: () => true }
+          : pending.readSync();
+        this.pendingFile = undefined;
+        if (!item) {
+          pending.closeSync();
+          this.pendingDirectory = undefined;
+          break;
+        }
+        // Crash-left acked files and unrelated entries must not make work unbounded.
+        examined++;
         if (!item.isFile() || !EVENT_FILE.test(item.name)) continue;
         const path = join(this.pending, item.name);
+        if (!existsSync(path)) continue;
         if (existsSync(join(this.acknowledged, item.name))) {
           unlinkSync(path);
           continue;
-        }
-        if (events.length === ACTIVITY_EVENT_BATCH_LIMIT) {
-          hasMore = true;
-          break;
         }
         let event: ActivityPublicEvent;
         try {
           if (statSync(path).size > 80_000) throw Error('Activity event exceeds size bound');
           event = parseActivityEvent(JSON.parse(readFileSync(path, 'utf8')));
           if (`${event.id}.json` !== item.name) throw Error('Activity event filename differs');
+          if (event.order?.revision) {
+            const orders = this.sources.find((source) => source.orders)?.orders;
+            const latest = orders?.load(event.order.offerId);
+            if (latest && (latest.observationRevision ?? 1) > event.order.revision) {
+              // An obsolete observation must not overwrite a newer recovery state.
+              this.acknowledge({ ids: [event.id] });
+              continue;
+            }
+          }
         } catch {
           this.quarantineEvent(item.name);
           continue;
         }
         const eventBytes = Buffer.byteLength(JSON.stringify(event));
         if (bytes + eventBytes > 500_000) {
+          this.pendingFile = item.name;
           hasMore = true;
           break;
         }
         bytes += eventBytes;
         events.push(event);
       }
-    } finally {
-      pending.closeSync();
+    } catch (error) {
+      this.pendingDirectory?.closeSync();
+      this.pendingDirectory = undefined;
+      throw error;
     }
     return { events, hasMore, degraded: this.degraded() };
   }

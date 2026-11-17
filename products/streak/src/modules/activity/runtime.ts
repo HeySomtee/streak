@@ -8,6 +8,10 @@ import { sponsorProxy } from '../direct/sponsor-proxy';
 import { canonicalActivityCheckpoint, readActivityMarket } from './chain';
 import { ActivityService } from './service';
 import { PgActivityStorage } from './storage';
+import { orderConfig } from '../direct/order-config';
+import { parseActivityEventBatch } from './events';
+import { campaignEntryPayments, campaignPaymentsEnabled } from '../campaigns/runtime';
+import { prepareOrderEvents } from './order-delivery';
 
 const client = new ccc.ClientPublicTestnet({
   url: 'https://testnet.ckb.dev/',
@@ -39,10 +43,18 @@ export function activityService(): ActivityService | undefined {
         new DirectRegistry(process.env.STREAK_DIRECT_REGISTRY_DIR),
         new DirectRegistry(process.env.STREAK_DIRECT_LEGACY_REGISTRY_DIR),
         new DirectRegistry(process.env.STREAK_DIRECT_BATCH_REGISTRY_DIR, V4_DIRECT_CONFIG),
+        new DirectRegistry(process.env.STREAK_ORDER_REGISTRY_DIR, orderConfig()),
       ].flatMap((registry) =>
         registry.all().map((descriptor) => ({ ...descriptor, entryEnabled: false })),
       ),
-    events: () => sponsorProxy('/activity/events'),
+    events: async () => {
+      const batch = parseActivityEventBatch(await sponsorProxy('/activity/events'));
+      return campaignPaymentsEnabled()
+        ? prepareOrderEvents(batch, client, (event) =>
+            campaignEntryPayments().bindOrderExecution(event),
+          )
+        : batch;
+    },
     acknowledge: (ids) => sponsorProxy('/activity/ack', { ids }),
     project: (descriptor, previous) => readActivityMarket(client, descriptor, previous),
     canonicalCheckpoint: (projection) => canonicalActivityCheckpoint(client, projection),

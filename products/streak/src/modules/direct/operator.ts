@@ -4,6 +4,7 @@ import type { Match } from '../../types';
 import {
   createRecord,
   PUBLIC_DIRECT_CONFIG,
+  V5_DIRECT_CONFIG,
   protocolConfigFor,
   maxLockArgs,
   type DirectMarketRecord,
@@ -244,7 +245,9 @@ export async function buildCreate(
   const fund = await funding(client, lock, MARKET_RESERVE_SHANNONS + changeAndFee);
   const args = hex(
     Buffer.concat([
-      Buffer.from(fund.outPoint.toBytes()),
+      config.protocolHash === V5_DIRECT_CONFIG.protocolHash
+        ? Buffer.concat([raw(ccc.hashCkb(fund.outPoint.toBytes())), Buffer.alloc(4)])
+        : Buffer.from(fund.outPoint.toBytes()),
       raw(lock.hash()),
       le(BigInt(cutoff)),
       raw(config.guardHash),

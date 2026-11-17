@@ -1,4 +1,5 @@
 import * as ccc from '@ckb-ccc/core';
+import { orderConfig } from './order-config';
 import { existsSync, readFileSync, readdirSync, renameSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -191,9 +192,12 @@ export async function runWorkerOnce(stopping: () => boolean = () => false): Prom
     }
     const archivedRegistry = new DirectRegistry(process.env.STREAK_DIRECT_LEGACY_REGISTRY_DIR);
     const records = new Map(
-      [...archivedRegistry.all(), ...registry.all(), ...(batchRegistry?.all() ?? [])].map(
-        (record) => [record.id, record],
-      ),
+      [
+        ...archivedRegistry.all(),
+        ...registry.all(),
+        ...(batchRegistry?.all() ?? []),
+        ...new DirectRegistry(process.env.STREAK_ORDER_REGISTRY_DIR, orderConfig()).all(),
+      ].map((record) => [record.id, record]),
     );
     const conflictState = await canonicalSponsorConflicts(client, journal.directory);
     if (stopping()) return;

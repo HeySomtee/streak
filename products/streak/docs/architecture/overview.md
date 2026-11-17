@@ -1,5 +1,12 @@
 # Architecture and migration
 
+9 November [sign-once queue](../delivery/signed-payment-queue.md) adds a v5 order lock
+for new, pre-created markets. Wallet funding avoids shared market inputs; the existing
+operator later admits the immutable slip or refunds it after expiry. Durable acceptance
+precedes acknowledgement. Competition scoring binds verified admission transactions.
+Existing v4 markets and signed recovery records retain their original rules. This is
+local implementation, not public deployment or a replacement of historical positions.
+
 9 November [bounded concurrency](../delivery/three-payment-concurrency.md) admits up
 to three independent atomic-v4 payments using existing durable offers and the shared
 operator lease. Pending outputs, original signed inputs and unproven ancestors remain

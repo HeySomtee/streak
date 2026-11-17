@@ -24,6 +24,7 @@ import {
   object,
   hash32,
   V4_DIRECT_CONFIG,
+  V5_DIRECT_CONFIG,
   type DirectMarketRecord,
 } from './registry';
 import { sponsoredOriginDescendant } from './sponsor-lineage';
@@ -226,6 +227,9 @@ export class BatchService extends SponsorService {
     for (const registry of this.options.existingRegistry ?? []) {
       const old = registry.get(id);
       if (!old || old.type.codeHash === this.options.config.protocolHash) continue;
+      // An empty queued market still owns this fixture's entry route. Never
+      // create a parallel v4 pool while its first order waits for admission.
+      if (old.type.codeHash === V5_DIRECT_CONFIG.protocolHash) return true;
       const state = await loadOperatorMarket(this.options.client, old);
       if (state.closed) continue;
       if (!state.market || state.shards.filter(Boolean).length !== 4)

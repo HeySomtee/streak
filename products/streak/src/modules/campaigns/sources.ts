@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { CampaignOptions } from '../../../shared/campaign-wire';
 import type { ActivitySourceSnapshot, PgActivityStorage } from '../activity/storage';
 import type { CampaignAbsenceSnapshot } from '../direct/campaign-absence';
-import { V4_DIRECT_CONFIG } from '../direct/registry';
+import { V4_DIRECT_CONFIG, V5_DIRECT_CONFIG } from '../direct/registry';
 import { standings, validateSquad, type Round } from '../five/domain';
 import type { FiveStorage } from '../five/storage';
 import { lockTime, TEST_TIMING_POLICY } from '../five/timing';
@@ -26,8 +26,14 @@ export interface CampaignSourceDependencies {
 }
 
 /** Frozen testnet generation/fixture identity before first-payment market creation. */
-export const campaignMarketPin = (fixtureId: string): string =>
-  `v4:${V4_DIRECT_CONFIG.protocolHash}:${fixtureId}`;
+export const campaignMarketPin = (
+  fixtureId: string,
+  protocolHash: string = V4_DIRECT_CONFIG.protocolHash,
+): string => {
+  if (![V4_DIRECT_CONFIG.protocolHash, V5_DIRECT_CONFIG.protocolHash].includes(protocolHash))
+    throw Error('Unsupported competition payment generation');
+  return `${protocolHash === V5_DIRECT_CONFIG.protocolHash ? 'v5' : 'v4'}:${protocolHash}:${fixtureId}`;
+};
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const iso = (value: number) => new Date(value).toISOString();
 const empty = (revision: unknown, now: number): CampaignEvidence => ({
@@ -73,11 +79,15 @@ export function predictionCampaignEvidence(
   }
   for (const fixture of campaign.fixtures) {
     const bound = campaign.bindings[fixture.fixtureId];
-    const lazy = fixture.marketKey === campaignMarketPin(fixture.fixtureId);
+    const protocolHash =
+      fixture.marketKey === campaignMarketPin(fixture.fixtureId, V5_DIRECT_CONFIG.protocolHash)
+        ? V5_DIRECT_CONFIG.protocolHash
+        : V4_DIRECT_CONFIG.protocolHash;
+    const lazy = fixture.marketKey === campaignMarketPin(fixture.fixtureId, protocolHash);
     const rows = sources.filter(
       (source) =>
         source.descriptor.fixtureId === fixture.fixtureId &&
-        source.descriptor.type.codeHash === V4_DIRECT_CONFIG.protocolHash,
+        source.descriptor.type.codeHash === protocolHash,
     );
     const row = rows[0];
     const expectedKey = bound ?? (lazy ? null : fixture.marketKey);
@@ -88,13 +98,15 @@ export function predictionCampaignEvidence(
     ]);
     // Only a fresh operator history attestation can finalize an uncreated fixture.
     if (!rows.length && lazy && !bound) {
-      const proof = freshProofs.find((p) =>
-        p.fixtures.some(
-          (f) =>
-            f.fixtureId === fixture.fixtureId &&
-            f.cutoffMs === Date.parse(fixture.cutoffAt) &&
-            f.status === 'absent',
-        ),
+      const proof = freshProofs.find(
+        (p) =>
+          p.protocolHash === protocolHash &&
+          p.fixtures.some(
+            (f) =>
+              f.fixtureId === fixture.fixtureId &&
+              f.cutoffMs === Date.parse(fixture.cutoffAt) &&
+              f.status === 'absent',
+          ),
       );
       if (proof) {
         revisions.push(['operator-attested-empty', fixture.fixtureId, fixture.cutoffAt]);

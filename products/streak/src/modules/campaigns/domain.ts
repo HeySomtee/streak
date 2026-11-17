@@ -102,6 +102,8 @@ export interface PredictionSlot {
   principalShannons: string;
   expiresAt: number;
   state: 'reserved' | 'started';
+  orderRevision?: number;
+  orderOutcome?: 'refunded' | 'failed';
 }
 export interface PayoutProof {
   transactionHash: string;
@@ -756,9 +758,17 @@ export function summary(c: Campaign, actor: CampaignActor, now: number): Campaig
             .filter(
               (slot) =>
                 (slot.state === 'started' || slot.expiresAt > now) &&
+                !slot.orderOutcome &&
                 !ownEntry.calls.some((call) => call.fixtureId === slot.fixtureId),
             )
             .map((slot) => slot.fixtureId),
+          unsuccessfulEntries: (ownEntry.predictionSlots ?? [])
+            .filter(
+              (slot) =>
+                slot.orderOutcome &&
+                !ownEntry.calls.some((call) => call.fixtureId === slot.fixtureId),
+            )
+            .map((slot) => ({ fixtureId: slot.fixtureId, outcome: slot.orderOutcome! })),
         }
       : {}),
   };

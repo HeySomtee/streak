@@ -10,6 +10,79 @@ the proposed throughput or new scripts have been verified.
 
 ## The decision in plain language
 
+### Sign-once server queue: owner correction, 9 November
+
+**New requirement, not implemented by `a1b2346`.** The user wants to approve a
+payment before waiting, close the app, and immediately prepare another payment
+from the same wallet. Three different wallets overlapping is insufficient.
+
+Current source has three separate constraints:
+
+- `atomic-reservations.ts` and `batch.ts` reserve inputs and block a second payment
+  for the same owner. The browser also blocks unresolved overlapping fixtures.
+- `review-queue.ts` waits before building an exact transaction. Its browser heartbeat
+  is not a durable signed-payment acceptance record.
+- `SponsorService.recoverPending` already resumes server-accepted signatures without
+  a browser. A signature stored only in the browser has not reached that boundary.
+
+Removing the owner restriction alone is insufficient. A wallet may have its whole
+balance in the first payment's input cell. Busy lanes also need replacement cells
+and committed block headers that are unknown at signing time. Those values are
+part of the signed transaction. The operator cannot substitute them later.
+Existing v4 `auth` requires an input with the bettor's wallet lock hash; a new
+escrow input cannot silently replace that authority for existing markets.
+
+**Recommended design for approval: independent noncustodial order tickets, with a
+versioned market admission path that recognizes them.** This changes scripts and
+entry funding, so it is outside a queue-only refactor. Existing markets retain v4
+payments, settlement and recovery; never migrate a live pool implicitly.
+
+The intended experience:
+
+1. Review the exact slip, competition choices, maximum charge and expiry. Approve
+   one funding transaction creating an independent order ticket, without spending
+   a shared market lane. The ticket binds owner, canonical market identities,
+   outcomes, amounts, refund lock and fee bounds. An unsigned promise is not payment.
+2. Persist and acknowledge the authorized transaction on the server before showing
+   **Saved for processing. You can leave the app.** Persist the browser copy too.
+   A lost acknowledgement remains **Checking receipt**, with an idempotent retry
+   of the same bytes. Do not claim server ownership before acknowledgement.
+3. The existing operator submits the funding transaction and fulfills confirmed
+   tickets as resources become available. Scripts restrict fulfillment to the
+   approved predictions and exact owner entitlement. The server cannot redirect
+   the funds or require a new bettor signature for ordinary fulfillment.
+4. Clear only the accepted draft and keep each payment independently visible in
+   the tracker and Activity. Permit a new slip from the same account. Use separate
+   available wallet cells, or a reviewed chain of transactions spending the exact
+   known change output of an earlier accepted funding transaction. That dependency
+   must be disclosed and tested across wallet providers; do not pretend unconfirmed
+   change is confirmed spendable balance. Bound the chain and pending queue.
+5. If execution misses cutoff or cannot obtain every required slot, return the
+   funded slip to its fixed owner destination through a permissionless, bounded-fee
+   refund path the operator can submit. Keep the existing all-or-nothing slip
+   promise. Do not silently enter only some picks or roll them into another match.
+
+Queue acceptance is not prediction admission. Preserve the current rule that a
+timely on-chain market entry determines eligibility, not a server queue timestamp.
+If that cannot happen, refund; competition points follow verified admission only.
+Publishing different cutoff rules would need a separate explicit decision.
+
+Before implementation, specify exact binary layouts and admission/refund proofs,
+including forged tickets, duplicate execution, double-spends, reorgs, service
+restart, queue limits, deadlines, full markets and competition versioning. Calculate
+occupied capacity and fund automatic refund fees; do not promise the current
+one-transaction cost for a two-stage flow. Cancellation cannot be called complete
+until execution is provably excluded. No general-purpose custody or new background
+service is proposed. Use the existing operator's durable recovery scheduling.
+
+Required acceptance: one wallet approves two slips, closes the browser before
+processing, and both finish without another prompt. Repeat with a single initial
+funding cell, busy same-market lanes, multiple users, rejection of the second
+signature, parent failure/reorg, restart, lost acknowledgement and deadline expiry.
+No double debit, lost order, incorrect points or indefinitely owner-inaccessible
+refund is acceptable. Physical MetaMask/Zerion evidence remains distinct from
+synthetic wallet and local-chain tests.
+
 ### Bounded concurrency brought forward, 9 November
 
 The owner now wants up to three prediction payments in flight during the experience

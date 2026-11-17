@@ -448,6 +448,30 @@ async function main(): Promise<void> {
       'PASS malformed Activity copies and sources are quarantined without blocking healthy delivery or losing recovery bytes',
     );
 
+    const backlogIds: string[] = [];
+    for (let index = 0; index < 71; index++) {
+      const content = {
+        ...paymentContent,
+        sourceRevision: `0x${index.toString(16).padStart(64, '0')}`,
+      };
+      const id = activityEventId(content);
+      backlogIds.push(id);
+      writeFileSync(
+        join(journal.directory, 'activity-outbox', 'pending', `${id}.json`),
+        JSON.stringify({ ...content, id }),
+      );
+    }
+    const seenBacklog = new Set<string>();
+    for (let pass = 0; pass < 4; pass++)
+      for (const event of relay.read().events) seenBacklog.add(event.id);
+    assert(
+      backlogIds.every((id) => seenBacklog.has(id)),
+      'More than 64 withheld observations cannot starve later healthy deliveries',
+    );
+    relay.acknowledge({ ids: backlogIds.slice(0, 64) });
+    relay.acknowledge({ ids: backlogIds.slice(64) });
+    relay.close();
+
     for (let index = 0; index < 300; index++)
       writeFileSync(join(journal.directory, `ignored-${index}.txt`), 'isolated');
     assert.equal(relay.read().hasMore, true, 'source directory enumeration is bounded per request');

@@ -197,6 +197,10 @@ async function browserChecks() {
     cwd: product,
     isolated: true,
   });
+  run('Signed queue checkout and recovery', [join(product, 'scripts/order-browser.cjs')], {
+    cwd: product,
+    isolated: true,
+  });
   run(
     'Sponsored first prediction browser regression',
     [join(product, 'scripts/sponsored-browser.cjs')],
@@ -336,6 +340,11 @@ try {
       await browserChecks();
     } else if (selected === 'contracts') {
       run(
+        'Queued order Rust VM regression',
+        [join(product, 'contracts/direct-v5/scripts/run.cjs'), 'test'],
+        { timeout: 1_200_000 },
+      );
+      run(
         'Atomic prediction Rust VM regression',
         [join(product, 'contracts/direct-v4/scripts/run.cjs'), 'test'],
         { timeout: 1_200_000 },
@@ -385,6 +394,11 @@ try {
       run(
         'Three simultaneous predictions signed devnet acceptance',
         [join(product, 'scripts/batch-devnet-run.cjs'), '--concurrency-only'],
+        { timeout: 600_000 },
+      );
+      run(
+        'Sign-once queued payments signed devnet acceptance',
+        [join(product, 'scripts/batch-devnet-run.cjs'), '--orders-only'],
         { timeout: 600_000 },
       );
       run(

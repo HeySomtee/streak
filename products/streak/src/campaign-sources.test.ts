@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import type { CampaignDraftInput, CampaignOptions } from '../shared/campaign-wire';
 import type { ActivityPosition } from '../shared/activity-wire';
 import type { ActivitySourceSnapshot } from './modules/activity/storage';
-import { V4_DIRECT_CONFIG, type DirectMarketDescriptor } from './modules/direct/registry';
+import {
+  V4_DIRECT_CONFIG,
+  V5_DIRECT_CONFIG,
+  type DirectMarketDescriptor,
+} from './modules/direct/registry';
 import { newRound, parseTerms, saveEntry } from './modules/five/domain';
 import { TEST_TIMING_POLICY } from './modules/five/timing';
 import {
@@ -195,6 +199,26 @@ async function main() {
   finalRow.projection!.settlementCheckpoint = { blockNumber: '10', blockHash: H(10) };
   const final = predictionCampaignEvidence(c, [finalRow], now);
   assert.equal(final.final, true);
+  const queuedCampaign = structuredClone(c),
+    queuedSource = structuredClone(finalRow);
+  queuedCampaign.fixtures[0].marketKey = campaignMarketPin('123', V5_DIRECT_CONFIG.protocolHash);
+  queuedSource.descriptor.type.codeHash = V5_DIRECT_CONFIG.protocolHash;
+  queuedSource.projection!.descriptor.type.codeHash = V5_DIRECT_CONFIG.protocolHash;
+  queuedSource.marketKey = 'queued-market';
+  const queuedEvidence = predictionCampaignEvidence(queuedCampaign, [queuedSource, finalRow], now);
+  assert.equal(queuedEvidence.final, true);
+  assert.equal(queuedEvidence.predictions.length, 1);
+  assert.equal(queuedEvidence.predictions[0].marketKey, 'queued-market');
+  assert.equal(
+    predictionCampaignEvidence(c, [queuedSource], now).predictions.length,
+    0,
+    'Published v4 competition must not silently move to v5',
+  );
+  assert.equal(
+    predictionCampaignEvidence(queuedCampaign, [finalRow], now).final,
+    false,
+    'A v4 projection cannot finalize a v5 competition',
+  );
   for (const ageField of ['checkedAt', 'projection'] as const) {
     const aged = structuredClone(finalRow);
     if (ageField === 'checkedAt') aged.checkedAt = now - 300_001;

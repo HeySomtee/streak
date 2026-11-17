@@ -5,6 +5,7 @@ import {
   validateRecord,
   V3_DIRECT_CONFIG,
   V4_DIRECT_CONFIG,
+  V5_DIRECT_CONFIG,
   type DirectMarketDescriptor,
 } from '../direct/registry';
 import { fundedPayout } from '../direct/operator';
@@ -276,7 +277,9 @@ export async function readActivityMarket(
   const genesis = observations.find((row) => row.transaction.hash() === descriptor.creationTxHash);
   requireEvidence(genesis, 'market creation is missing');
   const args = raw(descriptor.type.args),
-    batch = descriptor.type.codeHash === V4_DIRECT_CONFIG.protocolHash;
+    batch = [V4_DIRECT_CONFIG.protocolHash, V5_DIRECT_CONFIG.protocolHash].includes(
+      descriptor.type.codeHash,
+    );
   const base = batch ? args.readUInt32LE(32) : 0;
   const firstInput = genesis.transaction.inputs[0];
   requireEvidence(
@@ -387,7 +390,9 @@ export async function readActivityMarket(
       'genesis output offsets are inconsistent',
     );
     const sponsored =
-      index === 1 && (batch || descriptor.type.codeHash === V3_DIRECT_CONFIG.protocolHash);
+      index === 1 &&
+      (descriptor.type.codeHash === V4_DIRECT_CONFIG.protocolHash ||
+        descriptor.type.codeHash === V3_DIRECT_CONFIG.protocolHash);
     if (index === 0)
       requireEvidence(
         entry.state.kind === 'market' &&

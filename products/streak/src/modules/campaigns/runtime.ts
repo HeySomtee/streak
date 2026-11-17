@@ -6,7 +6,8 @@ import { provider } from '../../providers';
 import { activityService } from '../activity/runtime';
 import { fiveService } from '../five/runtime';
 import { lockTime, TEST_TIMING_POLICY } from '../five/timing';
-import { V4_DIRECT_CONFIG } from '../direct/registry';
+import { DirectRegistry, V4_DIRECT_CONFIG } from '../direct/registry';
+import { orderConfig } from '../direct/order-config';
 import { sponsorProxy } from '../direct/sponsor-proxy';
 import { CampaignError } from './domain';
 import { CampaignService } from './service';
@@ -40,6 +41,7 @@ export function campaignPaymentsEnabled(): boolean {
 /** Uses the same real fixture catalogue and Five rounds as the ordinary game pages. */
 export async function campaignOptions(): Promise<CampaignOptions> {
   const now = Date.now();
+  const queuedRegistry = new DirectRegistry(process.env.STREAK_ORDER_REGISTRY_DIR, orderConfig());
   const fixtures = await read((db) =>
     db.markets.flatMap((market) => {
       const match = db.matches.find((row) => row.id === market.matchId);
@@ -58,7 +60,10 @@ export async function campaignOptions(): Promise<CampaignOptions> {
         {
           fixtureId: match.id,
           marketId: market.id,
-          marketKey: campaignMarketPin(match.id),
+          marketKey: campaignMarketPin(
+            match.id,
+            queuedRegistry.get(match.id)?.type.codeHash ?? V4_DIRECT_CONFIG.protocolHash,
+          ),
           home: match.home.name,
           away: match.away.name,
           league: match.competition?.name ?? match.stage,

@@ -10,7 +10,7 @@ export function startHostedRecovery(
   let closing = false;
   let current: Promise<void> | undefined;
   let stopping: Promise<void> | undefined;
-  const interval = setInterval(() => {
+  const wake = () => {
     if (closing || current) return;
     current = Promise.resolve()
       .then(recover)
@@ -18,8 +18,13 @@ export function startHostedRecovery(
       .finally(() => {
         current = undefined;
       });
-  }, intervalMs);
-  server.once('close', () => clearInterval(interval));
+  };
+  const interval = setInterval(wake, intervalMs);
+  server.on('payment-accepted', wake);
+  server.once('close', () => {
+    clearInterval(interval);
+    server.off('payment-accepted', wake);
+  });
   return {
     stop() {
       if (stopping) return stopping;

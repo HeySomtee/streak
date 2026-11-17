@@ -1,5 +1,42 @@
 # Streak status
 
+17 November queue release candidate: recovery lock contention is corrected and
+durable v5 deployment tooling is implemented. Focused Chromium/WebKit and all
+eight signed disposable-chain checks pass. The final full release gate remains
+required. [Deployment procedure](docs/delivery/queue-release-2026-11-17.md). Public
+activation and physical-wallet acceptance remain separate.
+
+17 November release remains local and unpublished. Focused queue scheduling and
+Chromium/WebKit checks passed; the final full gate, deployment procedure and hosted
+acceptance remain outstanding. Render access stopped on a Computer Use URL-verification
+block. See the work tracker for the exact handoff.
+
+17 November release preparation: owner approved publication and weekend rehearsal.
+Fresh verification and independent review are underway in the standalone checkout.
+Public activation remains disabled pending a reviewed v5 deployment procedure and
+physical-wallet acceptance. Existing deployment journaling covers v2 through v4;
+local queue tests alone do not establish a safe public code deployment.
+9 November [sign-once payment queue](docs/delivery/signed-payment-queue.md) is implemented
+and verified locally. All 105 required stages have passing evidence across the major
+run and its continuations, completed at 20:32 UTC. Final unit/static checks and
+independent money/recovery review passed with no concrete blocker. This is combined
+evidence, not an uninterrupted major run. Public activation stays disabled; existing
+v4 markets keep their original flow. No push, deployment or physical MetaMask/Zerion
+acceptance is claimed. Earlier implementation checkpoints below are historical.
+
+9 November sign-once queue implementation is underway with owner approval. Local
+v5 VM checks and signed disposable-chain acceptance now cover three same-wallet
+payments, operator restart and an EVM expiry refund without another approval.
+Checkout, competition association and lifecycle integration are being completed.
+This is not a completed release; browser/database acceptance, edge-case review
+and the major gate remain. Public deployment remains disabled.
+
+9 November owner clarification: `a1b2346` does not deliver the requested multiple
+payments per wallet or a sign-first queue that survives leaving the app. Its
+three-wallet overlap remains a narrower verified result. The [corrected design](docs/architecture/concurrent-payments.md#sign-once-server-queue-owner-correction-9-november)
+records the required experience and the new authorization boundary for review.
+No further runtime change or deployment is claimed.
+
 9 November verified [three-payment concurrency release](docs/delivery/three-payment-concurrency.md):
 durable independent inputs, existing-market lane allocation, queued overflow and
 lifecycle priority. All 100 required local stages have passing evidence: 80 completed

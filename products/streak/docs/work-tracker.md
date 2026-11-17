@@ -1,9 +1,147 @@
 # Streak work tracker
 
-11 November dedicated repository: extracted the committed Streak baseline and
-required shared tools with relevant history. See [migration details](../../../docs/repository-migration.md).
-Keep uncommitted v5 work local until its own release; repository publication does
-not activate that protocol or change Render hosting.
+17 November test-fixture correction: the next full run exposed a mixed-clock
+competition fixture. The disposable Docker PostgreSQL clock was measured about
+1.1 seconds ahead of Windows, so synthetic chain evidence could predate its
+registration. Campaign fixture deadlines, offers and evidence now use PostgreSQL
+time consistently; the isolated campaign regression passes. Production scoring
+rules are unchanged. The final exact-tree gate is being rerun before publication.
+
+17 November release verification: all 105 application, database, browser and
+script stages passed in one run, but final cleanup raised ENOENT for an already
+removed temporary directory, so the hook correctly refused publication. Cleanup
+is now idempotent within the same validated temporary-path boundary; all 14
+quality-tooling regressions pass. A fresh complete gate is required for this final
+tree. Independent payment/deployment review found no remaining concrete blocker.
+No public deployment or physical-wallet acceptance is claimed.
+
+17 November continuation: owner approved completing and publishing the queue
+release. Recovery now uses short CAS writes around remote reads and rechecks
+shared inputs, execution slots and expiry before admission. Existing execution
+rebroadcast also rechecks its snapshot. Focused phone/desktop Chromium/WebKit
+checks pass, including slow recovery versus signed acceptance, competing lanes,
+stale writes, expiry crossing and execution-limit races. All eight signed
+disposable-chain checks pass, including new durable v5 deployment preparation,
+shared sentinel protection and lost-broadcast-response recovery. The public
+protocol binary is packaged and must match the reproducible build. Independent
+review corrections include fresh funding liveness and classified safe CLI errors.
+The final full gate is next. See [release and activation](delivery/queue-release-2026-11-17.md).
+No hosted activation or physical-wallet acceptance is claimed. Preserve the owner
+checklist outside the candidate during the gate and restore it after publication.
+
+17 November handoff: release is NOT committed, pushed or deployed. Computer Use
+stopped because it could not determine the browser URL confidently, after owner
+authorized the existing Chrome/Render session. Do not bypass that browser block.
+The first full gate stopped on CRLF formatting; foundation files were normalized.
+V5 pinned build passed. Focused Chromium/WebKit queue checks passed at both widths,
+including new delayed-recovery signed acceptance, cancellation, stale-error CAS
+and competing-lane checks. Independent review found no new fund-safety blocker in
+the CAS recovery change. Still add a fresh CAS before existing-execution rebroadcast,
+finish boundary regressions, and rerun the full gate for the final staged tree.
+The v5 deployment procedure/barrier integration and physical-wallet acceptance
+remain unresolved. No public activation. Owner acceptance checklist restored from
+its byte-preserved ignored backup. The owned test DB is stopped; see ignored
+.queue-release evidence under .quality-artifacts/queue-release-2026-11-17.
+
+17 November owner approved the weekend release and rehearsal. Prepare and publish
+the carried v5 queue with fresh required checks and independent review. Preserve
+the owner acceptance checklist separately during the exact-tree gate. Switch the
+existing Render service only with its persistent state retained. Public activation
+requires reviewed v5 deployment tooling, new markets and physical-wallet evidence;
+the existing deployment journal currently covers only v2 through v4. Do not enable
+v5 merely by setting environment variables. Next: complete the release gate and
+review, publish the disabled implementation, then resolve deployment prerequisites.
+Five and Predictions are the campaign scope; Survivor stays outside the campaign.
+11 November migration completed: public [HeySomtee/streak](https://github.com/HeySomtee/streak)
+contains 89 retained historical commits plus migration commit `89ecf6f`. Original
+authors and dates are preserved; the public migration guide maps rewritten IDs.
+All 100 baseline quality stages passed at 11:48 UTC and the push reused that exact
+tree receipt. The independent checkout is `C:/Users/HP/Desktop/streak`. Ninety
+existing uncommitted files, including the v5 queue and owner checklist, were copied
+and hash-checked; tracker handoff notes are the only deliberate copy difference.
+The private system guide remains ignored, and prior queue evidence was preserved.
+The original repository and remote remain intact. Render has not been switched;
+environment files, keys and operator/database state remain in the original setup.
+Public v5 activation and publication are still separate pending release work.
+
+11 November migration handoff: this is the standalone `HeySomtee/streak` checkout.
+The committed migration retains 89 historical commits and the original author/date
+metadata. See [migration details](../../../docs/repository-migration.md). The v5
+queue work and owner checklist below were copied byte-for-byte as local uncommitted
+work before adding this handoff. The source repository remains intact. Render has
+not been switched and public v5 activation remains disabled.
+
+11 November repository migration: owner requested a dedicated repository with
+history and selected public `HeySomtee/streak`. Prepare an independent history
+extraction including required shared contract and delivery tools. Preserve the
+original repository, private-file exclusions, uncommitted v5 queue work and owner
+checklist. Publication of the migrated committed baseline is distinct from
+releasing the uncommitted queue or switching the hosted Render service.
+
+9 November sign-once continuation: local checkout now accepts three same-wallet
+signatures, preserves accepted slips after browser closure and operator restart,
+and lets users build the next slip. Seven signed devnet checks cover eight-market
+admission, EVM expiry refunds, consumed control dependencies, settlement and claims.
+Chromium/WebKit at 390/1440px and disposable competition PostgreSQL pass.
+Independent review identified and prompted fixes for paginated conflict recovery,
+unacknowledged scoring deliveries, refund/failure presentation and regular-only
+payments without competition storage. A 71-event relay regression verifies that
+withheld events cannot starve later deliveries. Final source review found no
+concrete blocker. All 105 required stages have passing evidence at 20:32 UTC across
+the major run and continuations. Final unit/static checks also pass. Updated legacy
+fixtures verify IndexedDB v4 migration and supply the payment configuration endpoint;
+all original payment/recovery assertions remain. See the delivery record for failed
+attempts and successful reruns. This is not an uninterrupted major pass.
+Next: separately authorize publication and public v5 deployment, fund/pre-create
+new markets, then run physical-wallet acceptance. No publication, deployment or
+physical-wallet evidence is claimed. The owned disposable PostgreSQL was stopped.
+Preserve the owner's acceptance checklist and unrelated nested benchmark file.
+Earlier implementation checkpoints below record history, not current completion.
+
+9 November sign-once implementation checkpoint: v5 order-lock and empty-market
+genesis, shared encoding, server-owned funding/execution/refund journal, guarded
+same-wallet change chains, authenticated IPC/API, checkout/tracker routing and
+competition execution association are in progress locally. The v5 VM suite passes
+all 16 groups, including the new order authorization/refund attacks. The owned
+local-chain test accepted three same-wallet signatures before funding confirmation,
+restarted the operator and placed all three without browser calls. A real local
+OmniLock EVM signature also funded and automatically refunded an expired order
+without a second approval. These are synthetic fixtures on a disposable node,
+not physical-wallet or hosted evidence. No push or public deployment.
+
+Remaining before completion: finish late-upload/cancellation and conflict/reorg
+edge cases; browser and competition PostgreSQL acceptance; bounded journal/recovery
+review; lifecycle/claim integration validation; independent money/recovery review;
+formatting and the full major gate. Activation remains fail-closed without verified
+v5 code outpoints and a separate registry. Preserve the owner's edited hosted
+acceptance checklist and unrelated nested benchmark state.
+
+9 November implementation authorization: owner approved the noncustodial order-ticket
+and versioned market-admission upgrade. Implement the sign-once server queue, multiple
+pending slips per wallet, automatic execution/refund and clear accepted-versus-placed
+states. This supersedes the approval-needed checkpoint below. Preserve v4 markets
+and signed history. Required work: v5 script and attack tests; shared order encoding;
+durable operator queue/recovery; authenticated API and competition association;
+wallet transaction chains and UI; signed local-chain/browser acceptance; independent
+money/recovery review and the complete major gate. Public deployment/fund movement
+remain separate from local implementation evidence.
+
+9 November owner correction after `a1b2346`: the intended experience is multiple
+payments from the same wallet, with approval completed before entering a durable
+server queue. Once the server acknowledges acceptance, the user can leave the app
+and start another slip without further signing for the accepted payment. The
+released three-wallet allocation and browser-driven unsigned waiting do not meet
+that requirement. The screenshot's Not Paid record does not by itself establish
+which transaction or failure occurred; do not label it a confirmed queued payment.
+
+Source review confirms separate wallet/fixture restrictions and a pre-signature
+resource queue. Accepted signatures already have server-owned recovery. General
+sign-before-resource-allocation needs a different authorization design: existing
+v4 requires the bettor's wallet lock as an input, and its transaction signature
+fixes the market inputs and header dependencies. See the [reviewable correction](architecture/concurrent-payments.md#sign-once-server-queue-owner-correction-9-november).
+Do not silently remove reservations or turn this into a custodial wallet balance.
+The proposed order-ticket and market-authorization upgrade requires owner review
+before runtime work. Preserve existing market recovery and the polish sprint.
 
 9 November release checkpoint: bounded three-payment allocation and required
 verification are complete. Owner requested commit and push with hosted CI skipped.

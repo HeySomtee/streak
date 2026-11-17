@@ -30,7 +30,7 @@ import {
 
 export type OperatorAction = 'create' | 'report' | 'close' | 'batch';
 export const OPERATION_FILE =
-  /^(?:(?:create|report|close)-(?:v[234]-)?api-football-[1-9][0-9]{0,14}|(?:create|report|close|batch)-v[34]-api-football-[1-9][0-9]{0,14}-[0-9a-f]{64})\.json$/;
+  /^(?:(?:create|report|close)-(?:v[2345]-)?api-football-[1-9][0-9]{0,14}|(?:create|report|close|batch)-v[345]-api-football-[1-9][0-9]{0,14}-[0-9a-f]{64})\.json$/;
 export function operationKey(
   action: OperatorAction,
   fixtureId: string,
@@ -40,7 +40,7 @@ export function operationKey(
   if (!/^api-football-[1-9][0-9]{0,14}$/.test(fixtureId) || !/^0x[0-9a-f]{64}$/.test(protocolHash))
     throw Error('Unsupported operator operation identity');
   const base = `${action}-${directGeneration(protocolHash)}${fixtureId}`;
-  return ['v3-', 'v4-'].includes(directGeneration(protocolHash)) && creationHash
+  return ['v3-', 'v4-', 'v5-'].includes(directGeneration(protocolHash)) && creationHash
     ? `${base}-${hash32(creationHash, 'creation transaction hash').slice(2)}`
     : base;
 }

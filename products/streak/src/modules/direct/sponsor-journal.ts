@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import * as ccc from '@ckb-ccc/core';
 import { hash32, object, writeExclusiveJson } from './registry';
 import type { SponsorOffer, SponsorState } from './sponsor';
+import { orderReservedInputs } from './order-reservations';
 
 export interface SponsorEntry {
   version: 1;
@@ -167,6 +168,9 @@ export function assertSponsorInputsAvailable(
   resolved = new Set<string>(),
 ): void {
   const candidate = new Set(tx.inputs.map((input) => input.previousOutput.toHex()));
+  const orders = orderReservedInputs(operatorDirectory, now, tx.hash());
+  if ([...candidate].some((input) => orders.has(input)))
+    throw Error('An input is reserved by an accepted queued payment.');
   for (const entry of sponsorStores(operatorDirectory).flatMap((store) => store.active(now))) {
     if (
       entry.offer.rawHash === tx.hash() ||

@@ -1,14 +1,25 @@
 import { execFileSync } from 'node:child_process';
 import { readdirSync, realpathSync, rmSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 export const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
 export function removeTemporaryDirectory(folder, prefix) {
-  const target = realpathSync(folder);
+  const requested = resolve(folder);
+  if (dirname(requested) !== resolve(tmpdir()) || !basename(requested).startsWith(prefix)) {
+    throw new Error('Refusing cleanup outside the owned temporary directory.');
+  }
   const parent = realpathSync(tmpdir());
+  let target;
+  try {
+    target = realpathSync(requested);
+  } catch (error) {
+    // A child may already have removed this owned scratch directory.
+    if (error.code === 'ENOENT') return;
+    throw error;
+  }
   if (dirname(target) !== parent || !basename(target).startsWith(prefix)) {
     throw new Error('Refusing cleanup outside the owned temporary directory.');
   }

@@ -58,6 +58,30 @@ async function main(): Promise<void> {
       const batchConfig = await fetch(`${base}/api/direct/batch/config`);
       assert.equal(batchConfig.headers.get('cache-control'), 'no-store');
       assert.deepEqual(await batchConfig.json(), V4_DIRECT_CONFIG);
+      for (const action of ['wallet', 'offer', 'submit', 'status', 'cancel-review']) {
+        assert.equal(
+          (
+            await fetch(`${base}/api/direct/orders/${action}`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', origin: base },
+              body: '{}',
+            })
+          ).status,
+          401,
+          `Queued ${action} requires an authenticated wallet`,
+        );
+        assert.equal(
+          (
+            await fetch(`${base}/api/direct/orders/${action}`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', origin: 'https://attacker.invalid' },
+              body: '{}',
+            })
+          ).status,
+          403,
+          `Queued ${action} rejects cross-origin requests`,
+        );
+      }
       const batchDemand = (await (await fetch(`${base}/api/direct/batch/demand`)).json()) as {
         fixtures: unknown[];
         enabled: boolean;

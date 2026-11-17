@@ -1,4 +1,5 @@
 import { ccc } from '@ckb-ccc/core';
+import { ORDER_PROTOCOL_HASH } from '../../../../shared/order-codec.mjs';
 import {
   bytes,
   checkCell,
@@ -72,7 +73,7 @@ export async function loadMarket(
   )
     throw Error('Market creation is not confirmed on the canonical chain.');
   const args = bytes(descriptor.type.args);
-  const batch = descriptor.type.codeHash === BATCH_PROTOCOL_HASH;
+  const batch = [BATCH_PROTOCOL_HASH, ORDER_PROTOCOL_HASH].includes(descriptor.type.codeHash);
   const base = batch
     ? new DataView(args.buffer, args.byteOffset, args.byteLength).getUint32(32, true)
     : 0;
@@ -94,7 +95,9 @@ export async function loadMarket(
     });
     const state = checkCell(cell, descriptor);
     const firstPrediction =
-      (batch || descriptor.type.codeHash === SPONSORED_PROTOCOL_HASH) && index === 1;
+      (descriptor.type.codeHash === BATCH_PROTOCOL_HASH ||
+        descriptor.type.codeHash === SPONSORED_PROTOCOL_HASH) &&
+      index === 1;
     if (
       (!firstPrediction && cell.cellOutput.capacity !== SHARD_RESERVE) ||
       (index === 0

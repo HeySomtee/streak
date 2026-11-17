@@ -1,9 +1,11 @@
 import { isRecord, request } from '../../lib/http';
-import { parseDescriptor, parseManifest } from './protocol';
+import { parseDescriptor, parseManifest, configureOrderManifest } from './protocol';
 import type { Descriptor, Manifest } from './protocol';
 
 export async function getDirectConfig(signal?: AbortSignal): Promise<Manifest> {
-  return parseManifest(await request('/direct/config', signal));
+  const value = await request('/direct/config', signal);
+  if (isRecord(value) && value.orderDeployment) configureOrderManifest(value.orderDeployment);
+  return parseManifest(value);
 }
 
 export async function getDirectMarkets(

@@ -167,6 +167,16 @@ function summary(v: unknown): CampaignSummary {
           ] as const),
     pendingFixtureIds:
       x.pendingFixtureIds === undefined ? [] : list(x.pendingFixtureIds).map((id) => string(id)),
+    unsuccessfulEntries:
+      x.unsuccessfulEntries === undefined
+        ? []
+        : list(x.unsuccessfulEntries).map((value) => {
+            const entry = object(value);
+            return {
+              fixtureId: string(entry.fixtureId),
+              outcome: choice(entry.outcome, ['refunded', 'failed'] as const),
+            };
+          }),
     artwork: {
       icon: artworkAsset(isRecord(x.artwork) ? x.artwork.icon : null),
       banner: artworkAsset(isRecord(x.artwork) ? x.artwork.banner : null),

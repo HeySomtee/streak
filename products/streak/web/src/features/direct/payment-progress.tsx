@@ -8,6 +8,7 @@ import './payment-progress.css';
 export type PaymentStage =
   | 'preparing'
   | 'waiting'
+  | 'queued'
   | 'ready'
   | 'authorizing'
   | 'sending'
@@ -18,6 +19,10 @@ export type PaymentStage =
   | 'attention'
   | 'not-sent';
 const copy: Record<PaymentStage, [string, string]> = {
+  queued: [
+    'Payments saved for processing',
+    'You can leave the app or start another slip. No further approval is needed.',
+  ],
   waiting: [
     'Waiting for your payment review',
     'Your picks are saved. Open your slip to check or leave the queue.',
@@ -59,6 +64,7 @@ export function PaymentProgress({
   const moving = [
     'preparing',
     'waiting',
+    'queued',
     'authorizing',
     'sending',
     'checking',

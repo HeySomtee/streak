@@ -1,5 +1,13 @@
 # Streak documentation
 
+17 November [queue release and deployment](delivery/queue-release-2026-11-17.md):
+short recovery locks, durable v5 deployment, packaged pinned code and hosted
+acceptance steps. Public activation remains separate.
+
+9 November [sign-once server queue](delivery/signed-payment-queue.md): v5 order
+authorization, multiple pending slips per wallet, durable recovery and local
+acceptance evidence. Final gate/review and public activation remain separate.
+
 9 November [three-payment concurrency](delivery/three-payment-concurrency.md): local
 implementation, safety boundaries, verification and hosted funding prerequisites.
 All 100 required local stages pass across the interrupted major run and its

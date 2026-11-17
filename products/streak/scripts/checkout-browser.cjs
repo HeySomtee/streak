@@ -10,7 +10,7 @@ async function main() {
   const { build } = await import('vite');
   const { Wallet } = await import('ethers');
   const { batchChain, batchOwnerKey } = await import('./batch-browser-fixture.mjs');
-  const { BATCH_MANIFEST } = await import('../web/src/features/direct/protocol.ts');
+  const { BATCH_MANIFEST, MANIFEST } = await import('../web/src/features/direct/protocol.ts');
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'streak-checkout-browser-'));
   const publicRoot = path.resolve(__dirname, '../public');
   const evidence = path.resolve(__dirname, '../../../.quality-artifacts/checkout-browser');
@@ -208,7 +208,10 @@ async function main() {
             authAttempts++;
             if (authAttempts === 1)
               return json({ error: 'Synthetic sign-in could not be verified.' }, 400);
-            if (authAttempts === 3) await new Promise((resolve) => { releaseVerification = resolve; });
+            if (authAttempts === 3)
+              await new Promise((resolve) => {
+                releaseVerification = resolve;
+              });
             else await new Promise((resolve) => setTimeout(resolve, 350));
             // A successful verify response alone cannot establish a usable session.
             signedIn = authAttempts >= 3;
@@ -234,6 +237,7 @@ async function main() {
               nextOffset: null,
               coverage: { complete: true, from: '2020-01-01', to: '2040-01-01' },
             });
+          if (url.pathname === '/api/direct/config') return json(MANIFEST);
           if (url.pathname === '/api/direct/entry-mode')
             return failMode
               ? json({ error: 'Synthetic availability outage' }, 503)
@@ -416,16 +420,16 @@ async function main() {
             exact: true,
           });
           if (!reviewStarted) {
-          await page
-            .waitForFunction(() => {
-              const button = document.querySelector('.batch-checkout > button.review-button');
-              return button && !button.disabled;
-            })
-            .catch(async (error) => {
-              console.error(await page.locator('body').innerText());
-              throw error;
-            });
-          await review.click();
+            await page
+              .waitForFunction(() => {
+                const button = document.querySelector('.batch-checkout > button.review-button');
+                return button && !button.disabled;
+              })
+              .catch(async (error) => {
+                console.error(await page.locator('body').innerText());
+                throw error;
+              });
+            await review.click();
           }
           await page
             .getByRole('heading', {
@@ -833,7 +837,10 @@ async function main() {
         );
         await page.getByRole('button', { name: 'Sign in to continue', exact: true }).click();
         await slip.getByRole('button', { name: /Verifying sign-in/ }).waitFor();
-        assert.ok(releaseVerification, 'The verification response stays held while its progress is asserted.');
+        assert.ok(
+          releaseVerification,
+          'The verification response stays held while its progress is asserted.',
+        );
         releaseVerification();
         await page.getByRole('button', { name: 'Review payment', exact: true }).waitFor();
         assert.equal(authAttempts, 3);
@@ -845,7 +852,10 @@ async function main() {
         assert.equal(signatures, 0, 'Signing in never signs a payment.');
         await page.getByRole('button', { name: 'Review payment', exact: true }).click();
         await page.getByText('Review queue · 1 ahead', { exact: true }).waitFor();
-        assert.equal(await page.getByRole('button', { name: 'Leave queue', exact: true }).count(), 1);
+        assert.equal(
+          await page.getByRole('button', { name: 'Leave queue', exact: true }).count(),
+          1,
+        );
         await page.screenshot({ path: path.join(evidence, `queued-review-${name}-${width}.png`) });
         assert.equal(
           signatures,

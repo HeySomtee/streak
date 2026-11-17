@@ -34,6 +34,7 @@ export async function sponsorProxy(
       path,
     ) &&
     !/^\/activity\/(?:events|ack)$/.test(path) &&
+    !/^\/orders\/(?:configuration|wallet|offer|submit|status|cancel-review)$/.test(path) &&
     path !== '/campaign/absence'
   )
     throw Error('Invalid sponsor operation');

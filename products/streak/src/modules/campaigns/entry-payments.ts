@@ -2,6 +2,9 @@ import { isDeepStrictEqual } from 'node:util';
 import { ccc } from '@ckb-ccc/core';
 import type { Pool, PoolClient } from 'pg';
 import type { BatchOffer } from '../../../shared/batch-wire';
+import type { OrderOffer } from '../../../shared/order-wire';
+import { decodeOrder, validateOrderOffer } from '../../../shared/order-codec.mjs';
+import type { ActivityPublicEvent } from '../activity/events';
 import {
   CampaignError,
   object,
@@ -20,6 +23,52 @@ interface PaymentIntent {
   expiresAt: number;
   state: 'reserved' | 'started' | 'released';
   lines: Array<PredictionSlot & { campaignIds: string[] }>;
+}
+type EntryOffer = Pick<BatchOffer, 'offerId' | 'rawHash' | 'ownerLock' | 'expiresAt'> & {
+  lines: Array<
+    Pick<
+      BatchOffer['lines'][number],
+      'fixture' | 'mode' | 'outputIndex' | 'outcome' | 'principalShannons'
+    >
+  >;
+};
+/** Explicit regular-only choices remain valid when competition storage is disabled. */
+export function regularOnlySelection(value: unknown, accountId: string): boolean {
+  if (value === undefined) return true;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const selection = value as Record<string, unknown>;
+  return (
+    selection.accountId === accountId &&
+    Array.isArray(selection.lines) &&
+    selection.lines.length > 0 &&
+    selection.lines.length <= 8 &&
+    selection.lines.every((item: unknown) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+      const line = item as Record<string, unknown>;
+      return (
+        typeof line.fixtureId === 'string' &&
+        Array.isArray(line.campaignIds) &&
+        line.campaignIds.length === 0
+      );
+    })
+  );
+}
+export function orderEntryOffer(value: unknown): EntryOffer {
+  const offer: OrderOffer = validateOrderOffer(value),
+    data = decodeOrder(offer.orderData);
+  return {
+    offerId: offer.id,
+    rawHash: offer.rawHash,
+    ownerLock: offer.ownerLock,
+    expiresAt: offer.expiresAt,
+    lines: offer.markets.map((market, i) => ({
+      fixture: { ...market, sponsorLock: offer.ownerLock, state: 'funded' },
+      mode: 'deposit',
+      outputIndex: i,
+      outcome: data.lines[i].outcome,
+      principalShannons: data.lines[i].principalShannons,
+    })),
+  };
 }
 
 /** Private operator output is still checked before it can bind competition points. */
@@ -107,7 +156,7 @@ export class CampaignEntryPayments {
       client.release();
     }
   }
-  async reserve(actor: Actor, offer: BatchOffer, selection: unknown): Promise<void> {
+  async reserve(actor: Actor, offer: EntryOffer, selection: unknown): Promise<void> {
     if (ccc.Script.from(offer.ownerLock).hash() !== actor.ownerHash)
       throw new CampaignError('Use the signed-in wallet for this payment.', 403);
     const choices = new Map<string, string[]>();
@@ -265,8 +314,124 @@ export class CampaignEntryPayments {
       true,
     );
   }
+  /** Called only for a freshly verified canonical order execution, never its funding receipt. */
+  async bindOrderExecution(event: ActivityPublicEvent): Promise<void> {
+    if (!event.order || !event.ownerHash) return;
+    const outcome =
+      event.state === 'refunded' || event.state === 'failed' ? event.state : undefined;
+    const confirming = event.state === 'confirming' && event.order.revision !== undefined;
+    if (event.kind !== 'payment' || (!outcome && !confirming && event.state !== 'funded'))
+      throw new CampaignError('Queued execution is not confirmed.', 503);
+    if (!outcome && !confirming && !event.positions)
+      throw new CampaignError('Queued execution has no predictions.', 503);
+    await this.init();
+    await this.transaction(event.ownerHash, async (client, now) => {
+      const rows = await client.query<{ data: PaymentIntent }>(
+        'SELECT data FROM streak_campaign_payment_intents WHERE offer_id=$1 AND raw_hash=$2',
+        [event.order!.offerId, event.order!.fundingHash],
+      );
+      const intent = rows.rows[0]?.data;
+      if (!intent) return;
+      if (
+        intent.ownerHash !== event.ownerHash ||
+        intent.state !== 'started' ||
+        (!outcome && !confirming && intent.lines.length !== event.positions!.length)
+      )
+        throw new CampaignError('Queued competition authorization differs.', 503);
+      for (const [i, line] of (outcome || confirming ? [] : intent.lines).entries()) {
+        const p = event.positions![i];
+        if (
+          p.descriptor.fixtureId !== line.fixtureId ||
+          p.ownerHash !== intent.ownerHash ||
+          p.position.outcome !== line.outcome ||
+          p.position.principalShannons !== line.principalShannons ||
+          p.position.outPoint?.index !== i ||
+          p.position.outPoint?.txHash !== event.transactionHash ||
+          p.position.transactionHash !== event.transactionHash
+        )
+          throw new CampaignError('Queued competition prediction differs.', 503);
+      }
+      for (const id of [...new Set(intent.lines.flatMap((l) => l.campaignIds))].sort()) {
+        const campaigns = await client.query<{ data: Campaign }>(
+          'SELECT data FROM streak_campaigns WHERE id=$1 FOR UPDATE',
+          [id],
+        );
+        const campaign = campaigns.rows[0]?.data;
+        if (!campaign) continue;
+        const entries = await client.query<{ data: CampaignEntry }>(
+          'SELECT data FROM streak_campaign_entries WHERE campaign_id=$1 AND account_id=$2 FOR UPDATE',
+          [id, intent.accountId],
+        );
+        const entry = entries.rows[0]?.data;
+        if (!entry) continue;
+        let changed = false;
+        for (const slot of entry.predictionSlots ?? [])
+          if (slot.offerId === intent.offerId) {
+            if ((slot.orderRevision ?? 0) > (event.order!.revision ?? 0)) continue;
+            const index = intent.lines.findIndex((l) => l.fixtureId === slot.fixtureId);
+            if (index < 0) throw new CampaignError('Queued competition slot differs.', 503);
+            if (slot.orderOutcome !== outcome || slot.orderRevision !== event.order!.revision) {
+              slot.orderOutcome = outcome;
+              slot.orderRevision = event.order!.revision;
+              changed = true;
+            }
+            if (
+              !outcome &&
+              !confirming &&
+              (slot.rawHash !== event.transactionHash || slot.outputIndex !== index)
+            ) {
+              slot.rawHash = event.transactionHash;
+              slot.outputIndex = index;
+              changed = true;
+            }
+          }
+        if (!changed) continue;
+        campaign.revision++;
+        campaign.updatedAt = new Date(now).toISOString();
+        await client.query(
+          'UPDATE streak_campaign_entries SET data=$3 WHERE campaign_id=$1 AND account_id=$2',
+          [id, intent.accountId, JSON.stringify(entry)],
+        );
+        await client.query(
+          'UPDATE streak_campaigns SET data=$2,due_at=clock_timestamp(),wake_generation=wake_generation+1 WHERE id=$1',
+          [id, JSON.stringify(campaign)],
+        );
+        await client.query(
+          "INSERT INTO streak_campaign_audit(campaign_id,revision,actor_id,action,data) SELECT id,(data->>'revision')::integer,$2,$3,$4 FROM streak_campaigns WHERE id=$1",
+          [
+            id,
+            intent.accountId,
+            'queued-entry-executed',
+            JSON.stringify({
+              offerId: intent.offerId,
+              fundingHash: intent.rawHash,
+              executionHash: event.transactionHash,
+            }),
+          ],
+        );
+      }
+    });
+  }
   async release(actor: Actor, identity: unknown): Promise<boolean> {
     return this.releaseIntent(actor, identity, false);
+  }
+  async observeOrderCancellation(value: unknown): Promise<void> {
+    const status = object(value);
+    if (status.state !== 'cancelled' || status.acceptedAt !== undefined)
+      throw new CampaignError('Order cancellation was not confirmed.', 503);
+    const offer = validateOrderOffer(status.offer);
+    await this.init();
+    const result = await this.pool.query<{ data: PaymentIntent }>(
+      'SELECT data FROM streak_campaign_payment_intents WHERE offer_id=$1 AND raw_hash=$2',
+      [offer.id, offer.rawHash],
+    );
+    const intent = result.rows[0]?.data;
+    if (!intent) return;
+    await this.releaseIntent(
+      { id: intent.accountId, ownerHash: intent.ownerHash, name: '', wallet: '' },
+      { offerId: offer.id, rawHash: offer.rawHash },
+      true,
+    );
   }
   private async releaseIntent(
     actor: Actor,

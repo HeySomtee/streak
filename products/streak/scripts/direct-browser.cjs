@@ -723,7 +723,7 @@ async function main() {
           await page.evaluate(
             ({ ownerHash, hash }) =>
               new Promise((resolve, reject) => {
-                const open = indexedDB.open('streak-direct-transactions-v1', 3);
+                const open = indexedDB.open('streak-direct-transactions-v1');
                 open.onerror = () => reject(open.error);
                 open.onsuccess = () => {
                   const db = open.result,
@@ -782,7 +782,7 @@ async function main() {
         await page.evaluate(
           (ownerHash) =>
             new Promise((resolve, reject) => {
-              const request = indexedDB.open('streak-direct-transactions-v1', 3);
+              const request = indexedDB.open('streak-direct-transactions-v1');
               request.onerror = () => reject(request.error);
               request.onsuccess = () => {
                 const db = request.result,

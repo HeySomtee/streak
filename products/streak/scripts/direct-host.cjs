@@ -103,11 +103,13 @@ function buildConfig(env) {
   if (new Set([apiPort, sponsorPort, controlPort]).size !== 3)
     throw Error('API, sponsor and supervisor ports must differ.');
   const stateRoot = env.STREAK_HOST_STATE_DIR || '/var/data/streak';
+  if (Boolean(env.STREAK_ORDER_PROTOCOL_TX_HASH) !== Boolean(env.STREAK_ORDER_REGISTRY_DIR))
+    throw Error('Queued payments require both a deployment hash and separate registry directory.');
   if (!path.isAbsolute(stateRoot)) throw Error('STREAK_HOST_STATE_DIR must be absolute.');
   const registry = {
     STREAK_DIRECT_REGISTRY_DIR: requireValue(env, 'STREAK_DIRECT_REGISTRY_DIR'),
     STREAK_DIRECT_BATCH_REGISTRY_DIR: requireValue(env, 'STREAK_DIRECT_BATCH_REGISTRY_DIR'),
-    ...pick(env, ['STREAK_DIRECT_LEGACY_REGISTRY_DIR']),
+    ...pick(env, ['STREAK_DIRECT_LEGACY_REGISTRY_DIR', 'STREAK_ORDER_REGISTRY_DIR']),
   };
   const operatorDir = requireValue(env, 'STREAK_DIRECT_OPERATOR_DIR');
   const artworkDir = path.join(stateRoot, 'campaign-artwork');
@@ -136,6 +138,7 @@ function buildConfig(env) {
     throw Error('Unset bulk provisioning mode/progress for first-bettor creation.');
   const common = {
     ...pick(env, COMMON),
+    ...pick(env, ['STREAK_ORDER_PROTOCOL_TX_HASH']),
     NODE_ENV: 'production',
     STREAK_SKIP_ENV_FILE: '1',
     ...registry,

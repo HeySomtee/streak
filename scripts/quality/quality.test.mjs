@@ -36,6 +36,17 @@ test('new nested regression tests are discovered without editing a test allowlis
   assert.throws(() => removeTemporaryDirectory(cwd, 'incorrect-prefix-'), /Refusing cleanup/);
 });
 
+test('temporary cleanup is repeatable without weakening its path boundary', (t) => {
+  const cwd = fixture(t);
+  removeTemporaryDirectory(cwd, 'streak-policy-');
+  assert.doesNotThrow(() => removeTemporaryDirectory(cwd, 'streak-policy-'));
+  assert.throws(() => removeTemporaryDirectory(cwd, 'incorrect-prefix-'), /Refusing cleanup/);
+  assert.throws(
+    () => removeTemporaryDirectory(join(cwd, 'streak-policy-missing'), 'streak-policy-'),
+    /Refusing cleanup/,
+  );
+});
+
 test('commit gate rejects unstaged edits and untracked source, and accepts the staged candidate', (t) => {
   const cwd = fixture(t);
   const git = (...args) =>

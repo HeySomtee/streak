@@ -1,0 +1,17 @@
+{
+  "version": "direct-v5",
+  "networkDeployment": null,
+  "rustToolchain": "1.97.1",
+  "target": "riscv64imac-unknown-none-elf",
+  "maximumLockArgsBytes": 59,
+  "protocol": {
+    "binary": "streak-protocol-v5",
+    "codeHash": "0x9f2de55c41d35ed55a90c858f582a9f662be79fdc6f210699c8c16214541fdb7",
+    "sizeBytes": 47880
+  },
+  "guard": {
+    "binary": "streak-guard",
+    "codeHash": "0x096ebfed6452d654dcfbf43379c2b6c745dba9af1dabcc3463bbd501a6fdeada",
+    "sizeBytes": 12664
+  }
+}

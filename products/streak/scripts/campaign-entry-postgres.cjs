@@ -46,7 +46,8 @@ module.exports = async function entryPaymentsJourney(pool) {
     occupied: 0,
     updatedAt: null,
   });
-  async function campaign(id, deadline = Date.now() + 60000) {
+  async function campaign(id, deadline) {
+    deadline ??= (await databaseNow()) + 60000;
     const draft = {
       name: id,
       description: 'Isolated entry intent test',
@@ -71,7 +72,8 @@ module.exports = async function entryPaymentsJourney(pool) {
       { actorId: admin.id, action: 'synthetic-publish-and-join' },
     );
   }
-  function offer(fixtureId = 'fixture-1', expiresAt = Date.now() + 60000, mode = 'create') {
+  async function offer(fixtureId = 'fixture-1', expiresAt, mode = 'create') {
+    expiresAt ??= (await databaseNow()) + 60000;
     const tx = ccc.Transaction.from({
       inputs: [{ previousOutput: { txHash: hex(serial++), index: 0 } }],
       outputs: [
@@ -103,10 +105,12 @@ module.exports = async function entryPaymentsJourney(pool) {
     lines: o.lines.map((line) => ({ fixtureId: line.fixture.fixtureId, campaignIds: ids })),
   });
   const audit = { actorId: 'synthetic-reader', action: 'reconcile' };
-  function evidence(o, overrides = {}) {
+  function evidence(o, now, overrides = {}) {
+    // Registration and admission use PostgreSQL time, which may differ from the host.
+    assert.ok(Number.isFinite(now));
     return {
       revision: randomUUID(),
-      verifiedAt: new Date().toISOString(),
+      verifiedAt: new Date(now).toISOString(),
       complete: true,
       final: false,
       five: [],
@@ -126,7 +130,7 @@ module.exports = async function entryPaymentsJourney(pool) {
           fixtureId: 'fixture-1',
           marketKey: 'canonical-fixture-1',
           outcome: 0,
-          committedAt: new Date().toISOString(),
+          committedAt: new Date(now).toISOString(),
           blockNumber: '7',
           transactionIndex: 0,
           outputIndex: o.lines[0].mode === 'create' ? 1 : 0,
@@ -141,7 +145,7 @@ module.exports = async function entryPaymentsJourney(pool) {
   }
   await campaign('explicit-a');
   await campaign('explicit-b');
-  const first = offer();
+  const first = await offer();
   await payments.reserve(actor, first, choice(first, ['explicit-b', 'explicit-a']));
   await payments.reserve(actor, first, choice(first, ['explicit-a', 'explicit-b']));
   for (const id of ['explicit-a', 'explicit-b']) {
@@ -151,7 +155,7 @@ module.exports = async function entryPaymentsJourney(pool) {
       1,
       'genesis ticket is after control output',
     );
-    assert.deepEqual(summary(c, actor, Date.now()).pendingFixtureIds, ['fixture-1']);
+    assert.deepEqual(summary(c, actor, await databaseNow()).pendingFixtureIds, ['fixture-1']);
   }
   await assert.rejects(
     payments.reserve(actor, first, choice(first, [])),
@@ -177,20 +181,20 @@ module.exports = async function entryPaymentsJourney(pool) {
     ]) {
       const c = await store.change(
         id,
-        (current, now) => reconcileCampaign(current, evidence(first, mismatch), now),
+        (current, now) => reconcileCampaign(current, evidence(first, now, mismatch), now),
         audit,
       );
       assert.equal(c.entries[0].points, 0, 'only the exact selected canonical ticket counts');
     }
     const c = await store.change(
       id,
-      (current, now) => reconcileCampaign(current, evidence(first), now),
+      (current, now) => reconcileCampaign(current, evidence(first, now), now),
       audit,
     );
     assert.equal(c.entries[0].points, 3);
     const originalTie = c.entries[0].tieBreakAt;
-    const replacement = evidence(offer()).predictions[0];
-    const reorg = { ...evidence(first), predictions: [replacement] };
+    const replacement = evidence(await offer(), await databaseNow()).predictions[0];
+    const reorg = { ...evidence(first, await databaseNow()), predictions: [replacement] };
     const missing = await store.change(
       id,
       (current, now) => reconcileCampaign(current, reorg, now),
@@ -202,7 +206,7 @@ module.exports = async function entryPaymentsJourney(pool) {
       'reorg cannot substitute a later regular prediction',
     );
     assert.equal(missing.entries[0].predictionSlots[0].rawHash, first.rawHash);
-    const restored = evidence(first, { committedAt: originalTie });
+    const restored = evidence(first, await databaseNow(), { committedAt: originalTie });
     const back = await store.change(
       id,
       (current, now) => reconcileCampaign(current, restored, now),
@@ -211,7 +215,7 @@ module.exports = async function entryPaymentsJourney(pool) {
     assert.equal(back.entries[0].points, 3);
     assert.equal(back.entries[0].tieBreakAt, originalTie);
   }
-  const regular = offer('fixture-2');
+  const regular = await offer('fixture-2');
   await payments.reserve(actor, regular, choice(regular, []));
   await assert.rejects(
     payments.reserve(actor, regular, choice(regular, ['explicit-a'])),
@@ -220,7 +224,7 @@ module.exports = async function entryPaymentsJourney(pool) {
   await payments.start(actor, regular);
   assert.equal((await store.load('explicit-a')).entries[0].predictionSlots.length, 1);
   await campaign('explicit-atomic');
-  const rollback = offer();
+  const rollback = await offer();
   await assert.rejects(
     payments.reserve(actor, rollback, choice(rollback, ['explicit-atomic', 'missing'])),
     /no longer available/,
@@ -230,7 +234,7 @@ module.exports = async function entryPaymentsJourney(pool) {
     undefined,
     'multi-competition reservation rolls back together',
   );
-  const raceOffers = [offer(), offer()];
+  const raceOffers = [await offer(), await offer()];
   const races = await Promise.allSettled(
     raceOffers.map((o) => payments.reserve(actor, o, choice(o, ['explicit-atomic']))),
   );
@@ -242,7 +246,7 @@ module.exports = async function entryPaymentsJourney(pool) {
   const reserved = raceOffers[races.findIndex((r) => r.status === 'fulfilled')];
   assert.equal(await payments.release(actor, reserved), true);
   await assert.rejects(payments.start(actor, reserved), /cancelled/);
-  const rebuilt = { ...reserved, offerId: randomUUID(), expiresAt: Date.now() + 60000 };
+  const rebuilt = { ...reserved, offerId: randomUUID(), expiresAt: (await databaseNow()) + 60000 };
   await payments.reserve(actor, rebuilt, choice(rebuilt, []));
   await assert.rejects(payments.start(actor, reserved), /cancelled/);
   await payments.start(actor, rebuilt);
@@ -254,7 +258,7 @@ module.exports = async function entryPaymentsJourney(pool) {
     ),
     /active competition choice/,
   );
-  const second = offer();
+  const second = await offer();
   await payments.reserve(actor, second, choice(second, ['explicit-atomic']));
   await payments.release(actor, reserved);
   assert.equal(
@@ -271,7 +275,7 @@ module.exports = async function entryPaymentsJourney(pool) {
     'release and submit cannot both succeed',
   );
   await campaign('explicit-expiry');
-  const expires = offer('fixture-1', (await databaseNow()) + 700);
+  const expires = await offer('fixture-1', (await databaseNow()) + 700);
   await payments.reserve(actor, expires, choice(expires, ['explicit-expiry']));
   await payments.start(actor, expires);
   await waitForDatabaseTime(expires.expiresAt);
@@ -285,20 +289,37 @@ module.exports = async function entryPaymentsJourney(pool) {
   );
   await assert.rejects(payments.start(actor, expires), /cancelled/);
   await campaign('explicit-unsigned-cancel');
-  const cancelled = offer();
+  const cancelled = await offer();
   await payments.reserve(actor, cancelled, choice(cancelled, ['explicit-unsigned-cancel']));
   await payments.start(actor, cancelled);
   await payments.observe({ state: 'cancelled', offer: cancelled, conflictHash: hex(991) });
-  assert.equal(await payments.release(actor, cancelled), false, 'A conflict alone cannot release a started entry');
-  await payments.observe({ state: 'cancelled', offer: cancelled, unsignedCancellation: true, signedBytes: '0x01' });
-  assert.equal(await payments.release(actor, cancelled), false, 'A signed response cannot claim unsigned cancellation');
+  assert.equal(
+    await payments.release(actor, cancelled),
+    false,
+    'A conflict alone cannot release a started entry',
+  );
+  await payments.observe({
+    state: 'cancelled',
+    offer: cancelled,
+    unsignedCancellation: true,
+    signedBytes: '0x01',
+  });
+  assert.equal(
+    await payments.release(actor, cancelled),
+    false,
+    'A signed response cannot claim unsigned cancellation',
+  );
   await payments.observe({ state: 'cancelled', offer: cancelled, unsignedCancellation: true });
-  assert.deepEqual((await store.load('explicit-unsigned-cancel')).entries[0].predictionSlots, [], 'Operator-confirmed never-accepted cancellation clears the failed entry');
+  assert.deepEqual(
+    (await store.load('explicit-unsigned-cancel')).entries[0].predictionSlots,
+    [],
+    'Operator-confirmed never-accepted cancellation clears the failed entry',
+  );
   await assert.rejects(payments.start(actor, cancelled), /cancelled/);
-  const expiredUnused = offer('fixture-2', (await databaseNow()) + 700);
+  const expiredUnused = await offer('fixture-2', (await databaseNow()) + 700);
   await payments.reserve(actor, expiredUnused, choice(expiredUnused, ['explicit-expiry']));
   await waitForDatabaseTime(expiredUnused.expiresAt);
-  const newAttempt = offer('fixture-2', Date.now() + 10000, 'deposit');
+  const newAttempt = await offer('fixture-2', (await databaseNow()) + 10000, 'deposit');
   await payments.reserve(actor, newAttempt, choice(newAttempt, ['explicit-expiry']));
   assert.equal(
     (await store.load('explicit-expiry')).entries[0].predictionSlots.find(
@@ -307,6 +328,99 @@ module.exports = async function entryPaymentsJourney(pool) {
     0,
   );
   await assert.rejects(payments.start(actor, expiredUnused), /expired/);
+  await campaign('queued-execution');
+  const queued = await offer('fixture-1', (await databaseNow()) + 60000, 'deposit');
+  await payments.reserve(actor, queued, choice(queued, ['queued-execution']));
+  await payments.start(actor, queued);
+  const executionHash = hex(87654),
+    event = {
+      version: 1,
+      id: hex(87655),
+      kind: 'payment',
+      state: 'funded',
+      transactionHash: executionHash,
+      ownerHash: actor.ownerHash,
+      order: { offerId: queued.offerId, fundingHash: queued.rawHash },
+      positions: [
+        {
+          descriptor: { fixtureId: 'fixture-1' },
+          ownerHash: actor.ownerHash,
+          position: {
+            outcome: 0,
+            principalShannons: '10000000000',
+            transactionHash: executionHash,
+            outPoint: { txHash: executionHash, index: 0 },
+          },
+        },
+      ],
+    };
+  const beforeQueued = await store.load('queued-execution');
+  assert.equal(beforeQueued.entries[0].predictionSlots[0].rawHash, queued.rawHash);
+  await assert.rejects(
+    () => payments.bindOrderExecution({ ...event, state: 'confirming' }),
+    /not confirmed/,
+  );
+  await assert.rejects(
+    () => payments.bindOrderExecution({ ...event, ownerHash: hex(87656) }),
+    /differs/,
+  );
+  const changed = structuredClone(event);
+  changed.positions[0].position.outcome = 2;
+  await assert.rejects(() => payments.bindOrderExecution(changed), /differs/);
+  await payments.bindOrderExecution(event);
+  await payments.bindOrderExecution(event);
+  const afterQueued = await store.load('queued-execution');
+  assert.equal(afterQueued.entries[0].predictionSlots[0].rawHash, executionHash);
+  assert.equal(afterQueued.entries[0].predictionSlots[0].outputIndex, 0);
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT count(*)::integer AS count FROM streak_campaign_audit WHERE campaign_id='queued-execution' AND action='queued-entry-executed'",
+      )
+    ).rows[0].count,
+    1,
+    'Replay must not create another binding/audit',
+  );
+  const refunded = {
+    ...event,
+    state: 'refunded',
+    positions: undefined,
+    order: { ...event.order, revision: 2 },
+  };
+  await payments.bindOrderExecution(refunded);
+  const afterRefund = await store.load('queued-execution');
+  assert.equal(afterRefund.entries[0].predictionSlots[0].orderOutcome, 'refunded');
+  assert.deepEqual(summary(afterRefund, actor, await databaseNow()).pendingFixtureIds, []);
+  assert.deepEqual(summary(afterRefund, actor, await databaseNow()).unsuccessfulEntries, [
+    { fixtureId: 'fixture-1', outcome: 'refunded' },
+  ]);
+  assert.equal(
+    await payments.release(actor, queued),
+    false,
+    'A refund preserves the irrevocable competition choice',
+  );
+  await payments.bindOrderExecution(event);
+  assert.equal(
+    (await store.load('queued-execution')).entries[0].predictionSlots[0].orderOutcome,
+    'refunded',
+    'Older deliveries cannot overwrite a newer outcome',
+  );
+  await payments.bindOrderExecution({
+    ...event,
+    state: 'confirming',
+    positions: undefined,
+    order: { ...event.order, revision: 3 },
+  });
+  assert.deepEqual(
+    summary(await store.load('queued-execution'), actor, await databaseNow()).pendingFixtureIds,
+    ['fixture-1'],
+    'A reorg restores processing without releasing its slot',
+  );
+  await payments.bindOrderExecution({ ...event, order: { ...event.order, revision: 4 } });
+  assert.equal(
+    (await store.load('queued-execution')).entries[0].predictionSlots[0].rawHash,
+    executionHash,
+  );
   const cutoff = (await databaseNow()) + 700;
   await campaign('explicit-cutoff', cutoff);
   const blocking = await pool.connect();
@@ -314,7 +428,7 @@ module.exports = async function entryPaymentsJourney(pool) {
   await blocking.query('SELECT id FROM streak_campaigns WHERE id=$1 FOR UPDATE', [
     'explicit-cutoff',
   ]);
-  const late = offer();
+  const late = await offer();
   const rejected = assert.rejects(
     payments.reserve(actor, late, choice(late, ['explicit-cutoff'])),
     /closed/,

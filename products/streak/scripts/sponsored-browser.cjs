@@ -198,6 +198,10 @@ async function main() {
         activePage = page;
         const reads = observeReads(page, base);
         page.on('pageerror', (error) => errors.push(error.message));
+        page.on('console', (message) => {
+          if (message.type() === 'error')
+            console.error('Sponsored browser console:', message.text());
+        });
         await page.exposeFunction('syntheticRpc', (method, params) => chain.rpc(method, params));
         await page.exposeFunction('syntheticSigning', () => {
           signatureCount++;

@@ -22,6 +22,8 @@ import { startHostedRecovery } from './hosted-drain';
 import { ActivityEventOutbox } from '../activity/outbox';
 import { readCampaignAbsence } from './campaign-absence';
 import { ReviewWaitingError } from './review-queue';
+import { OrderService } from './order-service';
+import { orderConfig, verifyOrderDeployment } from './order-config';
 
 function secret(value: string | undefined): string {
   if (!value || !/^[0-9a-f]{64}$/.test(value))
@@ -67,7 +69,7 @@ export function createSponsorServer(
   legacy: SponsorService,
   ipcSecret: string,
   batch?: BatchService,
-  options: { campaignEmptyHistoryAcknowledged?: boolean } = {},
+  options: { campaignEmptyHistoryAcknowledged?: boolean; orders?: OrderService } = {},
 ) {
   const expected = Buffer.from(`Bearer ${secret(ipcSecret)}`);
   const activity = new ActivityEventOutbox(legacy.options.journal);
@@ -86,6 +88,37 @@ export function createSponsorServer(
     let operation = 'unknown';
     try {
       const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+      if (url.pathname.startsWith('/orders/')) {
+        operation = 'orders';
+        const orders = options.orders;
+        if (url.pathname === '/orders/configuration' && req.method === 'GET')
+          return reply(res, 200, orders?.configuration() ?? { enabled: false });
+        if (!orders) return reply(res, 409, { error: 'Queued payments are not active yet.' });
+        if (req.method !== 'POST')
+          return reply(res, 405, { error: 'Use a signed-in payment request.' });
+        const payload = await body(req),
+          owner = payload.authenticatedOwnerAddress,
+          request = object(payload.request, 'order request');
+        if (typeof owner !== 'string' || owner.length > 300)
+          throw Error('Authenticated wallet required');
+        if (url.pathname === '/orders/wallet') return reply(res, 200, await orders.wallet(owner));
+        if (url.pathname === '/orders/offer') {
+          if (request.ownerAddress !== owner)
+            return reply(res, 403, { error: 'Use the wallet linked to the signed-in account.' });
+          return reply(res, 200, await orders.prepare(request));
+        }
+        const id = sponsorId(request.offerId);
+        if (url.pathname === '/orders/status') return reply(res, 200, orders.status(id, owner));
+        if (url.pathname === '/orders/cancel-review')
+          return reply(res, 200, await orders.cancel(id, owner));
+        if (url.pathname === '/orders/submit' && typeof request.userSignedBytes === 'string') {
+          const accepted = await orders.submit(id, owner, request.userSignedBytes);
+          reply(res, 200, accepted);
+          server.emit('payment-accepted');
+          return;
+        }
+        return reply(res, 404, { error: 'Unknown queued-payment operation.' });
+      }
       if (url.pathname === '/campaign/absence') {
         operation = 'campaign-absence';
         if (req.method !== 'POST' || !batch || options.campaignEmptyHistoryAcknowledged !== true)
@@ -211,6 +244,20 @@ export function createSponsorServer(
       const message = error instanceof Error ? error.message : '';
       const busy = error instanceof OperatorBusyError;
       const safe =
+        (operation === 'orders' &&
+          [
+            'Three payments from this wallet are already processing. You can keep building your next slip.',
+            'Finish or cancel an open review before starting another.',
+            'This wallet input is no longer available. Review your updated balance.',
+            'Wallet funding needs four confirmations before starting this payment.',
+            'This match is too close to kickoff to start a new payment.',
+            'Wait for an earlier funding transaction before extending this payment chain.',
+            'Insufficient unreserved CKB for this payment.',
+            'Insufficient unreserved CKB for the picks, refundable queue reserve, network fee and wallet change.',
+            'This unsigned review expired. Review the saved picks again.',
+            'This review was cancelled before acceptance. Start a new review.',
+            'This signed payment is already accepted and will continue automatically.',
+          ].includes(message)) ||
         /^(Sponsor is completing|Streak needs additional|Streak is at|Unsigned sponsor offer expired|Invalid owner transaction signature|Fixture terms changed|This fixture already has|Sponsored contract deployment|Sponsor funding is awaiting|Owner needs principal|Owner input must be live|This fixture has reached|This fixture has positions|This fixture has no available|This fixture is closed)/.test(
           message,
         );
@@ -318,13 +365,40 @@ export async function runSponsorService(): Promise<void> {
         registry: new DirectRegistry(batchDirectory, V4_DIRECT_CONFIG),
         existingRegistry: [
           service.options.registry,
+          ...(process.env.STREAK_ORDER_REGISTRY_DIR
+            ? [new DirectRegistry(process.env.STREAK_ORDER_REGISTRY_DIR, orderConfig())]
+            : []),
           ...(process.env.STREAK_DIRECT_LEGACY_REGISTRY_DIR
             ? [new DirectRegistry(process.env.STREAK_DIRECT_LEGACY_REGISTRY_DIR)]
             : []),
         ],
       })
     : undefined;
+  const queuedConfig = orderConfig();
+  let orders: OrderService | undefined;
+  if (queuedConfig.codeDeps.length) {
+    const orderDirectory = process.env.STREAK_ORDER_REGISTRY_DIR;
+    if (
+      !orderDirectory ||
+      !isAbsolute(orderDirectory) ||
+      [directory, registryDirectory, batchDirectory]
+        .filter(Boolean)
+        .some((p) => resolve(p!) === resolve(orderDirectory))
+    )
+      throw Error('Queued markets need a separate absolute registry directory');
+    await verifyOrderDeployment(client, queuedConfig);
+    orders = new OrderService({
+      client,
+      journal: service.options.journal,
+      config: queuedConfig,
+      registry: new DirectRegistry(orderDirectory, queuedConfig),
+      validateFixture: async (id) => {
+        await fixtures([id]);
+      },
+    });
+  }
   const server = createSponsorServer(service, ipc, batch, {
+    orders,
     campaignEmptyHistoryAcknowledged: process.env.STREAK_CAMPAIGNS_EMPTY_HISTORY_ACK === '1',
   });
   server.requestTimeout = 65_000;
@@ -340,6 +414,7 @@ export async function runSponsorService(): Promise<void> {
         ...(await service.recoverPending()),
         ...(batch ? await batch.recoverPending() : []),
       ];
+      await orders?.recoverPending();
       if (results.some((result) => result.needsReview))
         console.error(
           'A sponsored transaction needs bounded-history reconciliation. Its durable bytes remain reserved.',

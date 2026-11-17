@@ -14,7 +14,7 @@ import { Notice } from '../../components/notice';
 import { subscribeWallet, getWalletState } from '../../lib/wallet';
 import './slip-workspace.css';
 const BatchCheckout = lazy(() =>
-  import('../direct/batch-ui').then((module) => ({ default: module.BatchCheckout })),
+  import('../direct/order-ui').then((module) => ({ default: module.PaymentCheckout })),
 );
 
 export function PredictionSlip({

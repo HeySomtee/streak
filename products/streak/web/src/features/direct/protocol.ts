@@ -1,4 +1,5 @@
 import { ccc } from '@ckb-ccc/core';
+import { ORDER_PROTOCOL_HASH } from '../../../../shared/order-codec.mjs';
 
 export const VERSION = 'testnet-v1' as const;
 export const CKB = 100_000_000n;
@@ -117,11 +118,37 @@ export const BATCH_MANIFEST: Manifest = Object.freeze({
   ]),
 });
 export function protocolManifest(codeHash: string): Manifest {
+  if (codeHash === ORDER_PROTOCOL_HASH) return orderManifest;
   if (codeHash === BATCH_PROTOCOL_HASH) return BATCH_MANIFEST;
   if (codeHash === SPONSORED_PROTOCOL_HASH) return SPONSORED_MANIFEST;
   if (codeHash === PROTOCOL_HASH) return MANIFEST;
   if (codeHash === LEGACY_PROTOCOL_HASH) return LEGACY_MANIFEST;
   throw Error('This contract deployment is not supported.');
+}
+let orderManifest: Manifest = Object.freeze({
+  ...MANIFEST,
+  protocolHash: ORDER_PROTOCOL_HASH,
+  codeDeps: [],
+});
+export function configureOrderManifest(value: unknown): void {
+  const row = object(value);
+  if (
+    row.protocolHash !== ORDER_PROTOCOL_HASH ||
+    row.guardHash !== GUARD_HASH ||
+    !Array.isArray(row.codeDeps) ||
+    ![0, 2].includes(row.codeDeps.length)
+  )
+    throw Error('Invalid queued-market deployment.');
+  const codeDeps = row.codeDeps.map((raw) => {
+    const d = object(raw),
+      p = object(d.outPoint);
+    if (d.depType !== 'code') throw Error('Invalid queued-market dependency.');
+    return {
+      outPoint: { txHash: hex(p.txHash, 32), index: integer(p.index, 0, 0xffffffff) },
+      depType: 'code' as const,
+    };
+  });
+  orderManifest = Object.freeze({ ...orderManifest, codeDeps });
 }
 export function maxLockArgs(codeHash: string): number {
   protocolManifest(codeHash);

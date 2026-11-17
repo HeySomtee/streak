@@ -8,6 +8,7 @@ import {
   PUBLIC_DIRECT_CONFIG,
   V3_DIRECT_CONFIG,
   V4_DIRECT_CONFIG,
+  V5_DIRECT_CONFIG,
   PROVIDER_ORIGIN,
   type DirectMarketDescriptor,
   type DirectProtocolConfig,
@@ -187,7 +188,9 @@ function market(
 ) {
   const input = ccc.OutPoint.from({ txHash: H('7'), index: 3 });
   const args = Buffer.alloc(172);
-  if (config.protocolHash === V4_DIRECT_CONFIG.protocolHash) {
+  if (
+    [V4_DIRECT_CONFIG.protocolHash, V5_DIRECT_CONFIG.protocolHash].includes(config.protocolHash)
+  ) {
     Buffer.from(ccc.hashCkb(input.toBytes()).slice(2), 'hex').copy(args, 0);
     args.writeUInt32LE(base, 32);
   } else Buffer.from(input.toBytes()).copy(args, 0);
@@ -346,16 +349,12 @@ async function main() {
     PUBLIC_DIRECT_CONFIG,
     V3_DIRECT_CONFIG,
     V4_DIRECT_CONFIG,
+    V5_DIRECT_CONFIG,
   ]) {
     const chain = new Chain(),
-      sponsored = config === V3_DIRECT_CONFIG || config === V4_DIRECT_CONFIG;
-    const m = market(
-      chain,
-      config,
-      sponsored ? home : undefined,
-      CUTOFF - 60_000,
-      config === V4_DIRECT_CONFIG ? 4 : 0,
-    );
+      sponsored = config === V3_DIRECT_CONFIG || config === V4_DIRECT_CONFIG,
+      batch = config === V4_DIRECT_CONFIG || config === V5_DIRECT_CONFIG;
+    const m = market(chain, config, sponsored ? home : undefined, CUTOFF - 60_000, batch ? 4 : 0);
     const initial = await readActivityMarket(chain.client, m.descriptor);
     assert.equal(Object.keys(initial.owners).length, sponsored ? 1 : 0);
     const depositTx = deposit(
@@ -366,7 +365,7 @@ async function main() {
       m.guarded,
       CUTOFF - 40_000,
       undefined,
-      config === V4_DIRECT_CONFIG ? 2 : 0,
+      batch ? 2 : 0,
     );
     chain.reversed = true;
     const second = await readActivityMarket(chain.client, m.descriptor, initial);
@@ -380,11 +379,11 @@ async function main() {
         blockNumber: sponsored ? '1' : '2',
         timestamp: CUTOFF - (sponsored ? 60_000 : 40_000),
         transactionIndex: 0,
-        outputIndex: sponsored ? m.base + 1 : config === V4_DIRECT_CONFIG ? 2 : 0,
+        outputIndex: sponsored ? m.base + 1 : batch ? 2 : 0,
       },
       'original deposit evidence is independent of the carrying shard',
     );
-    const shardIndex = config === V4_DIRECT_CONFIG ? 2 : 0;
+    const shardIndex = batch ? 2 : 0;
     const thirdTx = deposit(
       chain,
       chain.cell(depositTx, shardIndex),

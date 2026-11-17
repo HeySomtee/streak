@@ -27,7 +27,9 @@ export async function batchChain(cutoffMs, deps = BATCH_MANIFEST.codeDeps, owner
   const rpc = new ccc.ClientPublicTestnet({ url: 'https://testnet.ckb.dev/', fallbacks: [] });
   // No code-dependency upgrades exist in this synthetic chain.
   rpc.findSingletonCellByType = async () => undefined;
-  const ownerSigner = ownerEvmAddress ? new ccc.SignerEvmAddressReadonly(rpc, ownerEvmAddress) : new ccc.SignerCkbPrivateKey(rpc, batchOwnerKey),
+  const ownerSigner = ownerEvmAddress
+      ? new ccc.SignerEvmAddressReadonly(rpc, ownerEvmAddress)
+      : new ccc.SignerCkbPrivateKey(rpc, batchOwnerKey),
     sponsorSigner = new ccc.SignerCkbPrivateKey(rpc, sponsorKey);
   const ownerAddress = await ownerSigner.getRecommendedAddressObj(),
     owner = ownerAddress.script,
@@ -362,9 +364,11 @@ export async function batchChain(cutoffMs, deps = BATCH_MANIFEST.codeDeps, owner
 
 export function attachBatchRpc(client, call) {
   client.findSingletonCellByType = async () => undefined;
-  client.getBalanceSingle = async (lock) => (await call('cells', ['lock'])).map(ccc.Cell.from)
-    .filter(cell => cell.cellOutput.lock.eq(lock) && !cell.cellOutput.type)
-    .reduce((total, cell) => total + cell.cellOutput.capacity, 0n);
+  client.getBalanceSingle = async (lock) =>
+    (await call('cells', ['lock']))
+      .map(ccc.Cell.from)
+      .filter((cell) => cell.cellOutput.lock.eq(lock) && !cell.cellOutput.type)
+      .reduce((total, cell) => total + cell.cellOutput.capacity, 0n);
   client.getCellLiveNoCache = async (point) => {
     const value = await call('cell', [json(point)]);
     return value ? ccc.Cell.from(value) : undefined;
@@ -389,7 +393,7 @@ export function attachBatchRpc(client, call) {
     for (const value of await call('cells', ['lock'])) yield ccc.Cell.from(value);
   };
   client.findCellsPagedNoCache = async (search) => ({
-    cells: (await call('cells', ['type', json(search.script)])).map(ccc.Cell.from),
+    cells: (await call('cells', [search.scriptType, json(search.script)])).map(ccc.Cell.from),
     lastCursor: '0x',
   });
   client.sendTransaction = async (tx) => call('broadcast', [tx.toHex()]);

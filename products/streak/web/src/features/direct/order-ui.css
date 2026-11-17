@@ -1,0 +1,47 @@
+.order-total {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.5rem 0;
+  font-size: 0.8rem;
+}
+.order-total > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.order-total dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.order-total-final {
+  padding-top: 0.5rem;
+  font-size: 1rem;
+  font-weight: 700;
+}
+.order-history {
+  display: grid;
+  gap: 0.75rem;
+}
+.order-history article {
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+}
+.order-history-heading,
+.order-history li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.order-history p,
+.order-history a,
+.order-history small {
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+.order-history ul {
+  display: grid;
+  gap: 0.5rem;
+  list-style: none;
+  padding: 0;
+}

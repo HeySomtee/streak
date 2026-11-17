@@ -44,6 +44,10 @@ async function main() {
     },
     5,
   );
+  server.emit('payment-accepted');
+  await delay(0);
+  assert.equal(recovered, 1, 'Accepted payment wakes recovery without waiting for its interval');
+  server.emit('payment-accepted');
   await delay(35);
   assert.equal(recovered, 1, 'recovery does not overlap');
   let stopped = false;

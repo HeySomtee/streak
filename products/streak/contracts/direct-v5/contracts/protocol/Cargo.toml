@@ -1,0 +1,8 @@
+[package]
+name = "streak-protocol-v5"
+version = "0.5.0"
+edition = "2021"
+
+[dependencies]
+ckb-std.workspace = true
+blake2b-ref = "=0.3.1"
