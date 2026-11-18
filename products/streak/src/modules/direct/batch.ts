@@ -670,7 +670,7 @@ export class BatchService extends SponsorService {
           version: 'atomic-predictions-v1',
           offerId: randomUUID(),
           expiresAt: Math.min(
-            this.now() + 90_000,
+            this.now() + 5 * 60_000,
             ...lines.map((line) => line.fixture.cutoffMs - 120_000),
           ),
           rawHash: prepared.hash(),
@@ -693,6 +693,14 @@ export class BatchService extends SponsorService {
         };
         assertFreshOperatorInputs(this.options.journal, prepared);
         await this.validateFrozen(offer);
+        // Allocate the complete review/signature window only after initial RPC work.
+        // This is an unsigned reservation lease, never an extension of match cutoff.
+        offer.expiresAt = Math.min(
+          this.now() + 5 * 60_000,
+          ...lines.map((line) => line.fixture.cutoffMs - 120_000),
+        );
+        if (this.now() >= offer.expiresAt)
+          throw Error('This fixture is closed for new payment reviews');
         this.store.save({
           version: 1,
           requestId: request.requestId,

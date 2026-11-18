@@ -10,7 +10,7 @@ import { CKB, BATCH_MANIFEST, pointKey } from './src/features/direct/protocol.ts
 
 async function setup(options = {}) {
   let now = Date.now();
-  const chain = await batchChain(now + 7_200_000),
+  const chain = await batchChain(now + 7_200_000, undefined, undefined, options.reviewWindowMs),
     rpc = attachBatchRpc(
       new ccc.ClientPublicTestnet({ url: 'https://testnet.ckb.dev/', fallbacks: [] }),
       chain.rpc,
@@ -811,4 +811,71 @@ test('Accepted receipts survive header and tip RPC outages without a new wallet 
     assert.notEqual(result.status, 'confirmed');
     assert.match(result.message, /Reconnecting/);
   }
+});
+
+test('Slow fresh wallet approval still hands off exact bytes without unrelated history reads', async () => {
+  const s = await setup({ reviewWindowMs: 5 * 60_000 });
+  const review = await s.client.prepare(picks(s.chain.fixtures(), 2));
+  const oldHash = '0x' + '98'.repeat(32);
+  s.others.push({
+    hash: oldHash,
+    inputs: [{ txHash: '0x' + '87'.repeat(32), index: 0 }],
+    fixtureId: 'api-football-999999',
+  });
+  const read = s.rpc.getTransactionNoCache.bind(s.rpc);
+  s.rpc.getTransactionNoCache = async (hash) => {
+    assert.notEqual(hash, oldHash, 'unrelated history cannot delay a fixed review or its handoff');
+    return read(hash);
+  };
+  let prompts = 0,
+    posts = 0;
+  const sign = s.signer.signTransaction.bind(s.signer);
+  s.signer.signTransaction = async (tx) => {
+    prompts++;
+    const signed = await sign(tx);
+    s.advance(95_000);
+    return signed;
+  };
+  const record = await s.client.signAndPersist(review, s.chain.fixtures());
+  s.transport.submit = async (request) => {
+    posts++;
+    assert.equal(request.userSignedBytes, record.ownerSignedBytes);
+    assert.equal(s.records.get(record.hash).ownerSignedBytes, record.ownerSignedBytes);
+    return {
+      offer: review.offer,
+      state: 'owner-signed',
+      transactionHash: record.hash,
+      ownerSignatureAccepted: true,
+    };
+  };
+  const result = await s.client.submit(record);
+  assert.equal(result.record.serverAccepted, true);
+  assert.equal(posts, 1);
+  assert.equal(prompts, 1);
+});
+
+test('Validation exhausting a fresh review never opens a stale wallet prompt', async () => {
+  const s = await setup({ reviewWindowMs: 5 * 60_000 });
+  const review = await s.client.prepare(picks(s.chain.fixtures(), 2));
+  const read = s.rpc.getCellLiveNoCache.bind(s.rpc);
+  let delayed = false,
+    prompts = 0;
+  s.rpc.getCellLiveNoCache = async (...args) => {
+    const result = await read(...args);
+    if (!delayed) {
+      delayed = true;
+      s.advance(60_001);
+    }
+    return result;
+  };
+  s.signer.signTransaction = async () => {
+    prompts++;
+    throw Error('Must not prompt');
+  };
+  await assert.rejects(
+    s.client.signAndPersist(review, s.chain.fixtures()),
+    /expired while checking/,
+  );
+  assert.equal(prompts, 0);
+  assert.equal(s.records.size, 0);
 });

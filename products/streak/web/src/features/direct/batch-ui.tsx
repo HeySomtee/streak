@@ -199,7 +199,7 @@ export function BatchTransaction({
       )}
       {!current.submissionAttemptedAt &&
         !current.finalSignedBytes &&
-        current.status !== 'discarded' &&
+        !['discarded', 'rejected', 'resolved'].includes(current.status) &&
         now >= current.offer.expiresAt && (
           <button className="quiet" disabled={busy} onClick={() => discard.mutate()}>
             {discard.isPending ? (
@@ -581,10 +581,11 @@ export function BatchCheckout({
         );
         if (identityRef.current === input.identityKey)
           setSaved({ record, identityKey: input.identityKey });
-        refresh();
         await assertActiveWallet(connection);
         assertAccount();
         onDismiss?.();
+        // Deliver before invalidating private queries: background history recovery
+        // uses the same wallet lock and must not get ahead of this signature.
         const result = await linked.data.submit(record);
         if (
           getWalletState().connection === connection &&

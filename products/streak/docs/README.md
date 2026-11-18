@@ -1,5 +1,8 @@
 # Streak documentation
 
+18 November [fresh-payment timing correction](delivery/fresh-payment-timing-2026-11-18.md):
+slow approval expiry, focused verification and owner-deferred full release checks.
+
 17 November [payment handoff and recovery](delivery/payment-handoff-2026-11-17.md):
 durable server receipts, automatic exact-byte delivery and safe expiry retirement.
 

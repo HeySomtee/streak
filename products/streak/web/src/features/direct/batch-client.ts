@@ -156,6 +156,7 @@ export class BatchClient {
     identity: Identity,
     fixtureIds: readonly string[] = [],
     ignoreHash?: string,
+    relevantInputs?: ReadonlySet<string>,
   ): Promise<Reservation[]> {
     const records = [
         ...(await this.journal.list(identity.scope)).map(parseReservation),
@@ -163,6 +164,14 @@ export class BatchClient {
       ],
       pending: Reservation[] = [];
     for (const record of records) {
+      // A fixed review cannot use unrelated historic inputs. Do not scan their
+      // chain state while the user's signature window is running.
+      if (
+        relevantInputs &&
+        !record.inputs.some((input) => relevantInputs.has(pointKey(input))) &&
+        !(record.fixtureIds ?? [record.fixtureId]).some((id) => fixtureIds.includes(id))
+      )
+        continue;
       if (record.hash === ignoreHash || (await reservationReleased(this.signer.client, record)))
         continue;
       pending.push(record);
@@ -607,7 +616,14 @@ export class BatchClient {
       const fixtureIds = review.offer.lines.map((line) => line.fixture.fixtureId);
       const assertReservations = async () => {
         const reserved = new Set(
-          (await this.pending(identity, fixtureIds)).flatMap((row) => row.inputs.map(pointKey)),
+          (
+            await this.pending(
+              identity,
+              fixtureIds,
+              undefined,
+              new Set(intent.tx.inputs.map((input) => pointKey(input.previousOutput))),
+            )
+          ).flatMap((row) => row.inputs.map(pointKey)),
         );
         if (intent.tx.inputs.some((input) => reserved.has(pointKey(input.previousOutput))))
           throw Error('Another signed payment reserves an input in this slip.');
@@ -618,6 +634,11 @@ export class BatchClient {
         review.expiresAt,
       );
       await this.verify(review.offer);
+      // Revalidation may be slow. Never open a wallet for an already expired review.
+      if (this.now() >= review.expiresAt)
+        throw Error(
+          'This review expired while checking the inputs. Review your saved picks again.',
+        );
       onStage?.('wallet');
       const signed = await this.signer.signTransaction(intent.tx.clone());
       // Wallet rejection preserves the unsigned handle; a returned signature uses recovery.
@@ -633,7 +654,9 @@ export class BatchClient {
         latestIdentity.ownerHash !== identity.ownerHash
       )
         throw Error('Wallet changed while signing. Nothing was submitted.');
-      await assertReservations();
+      // The same wallet lock has been held since the reservation check. Persist
+      // the exact signature now; IndexedDB also checks cross-store reservations
+      // atomically. Re-scanning historical chain state here can expire delivery.
       const record: BatchRecord = Object.freeze({
         version: 'atomic-predictions-v1',
         scope: identity.scope,

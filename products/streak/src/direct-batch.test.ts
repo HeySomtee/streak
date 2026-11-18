@@ -7,7 +7,7 @@ import * as ccc from '@ckb-ccc/core';
 import { BatchService, parseBatchRequest } from './modules/direct/batch';
 import { createSponsorServer } from './modules/direct/sponsor-http';
 import type { AddressInfo } from 'node:net';
-import { verifySponsorOwnerWitness } from './modules/direct/sponsor';
+import { verifySponsorOwnerWitness, type SponsorOffer } from './modules/direct/sponsor';
 import {
   cancelUnsignedSponsorOffers,
   sponsorFundingBlocked,
@@ -155,6 +155,52 @@ async function main() {
       /one to eight/,
     );
     assert.throws(() => parseBatchRequest({ ...request, picks: [picks[0], picks[0]] }), /repeat/);
+    class SlowInitialValidation extends BatchService {
+      protected override async validateFrozen(value: SponsorOffer): Promise<void> {
+        await super.validateFrozen(value);
+        now += 100_000;
+      }
+    }
+    const slowReview = new SlowInitialValidation({
+      ...options,
+      journal: new OperatorJournal(join(directory, 'slow-review-operator'), config),
+      registry: new DirectRegistry(join(directory, 'slow-review-registry'), config),
+    });
+    const slowRequest = { ...request, requestId: randomUUID() };
+    const slowOffer = await slowReview.prepareOffer(slowRequest);
+    assert.equal(
+      slowOffer.expiresAt - now,
+      300_000,
+      'RPC validation does not consume the user signing window',
+    );
+    now += 95_000;
+    assert.deepEqual(
+      await slowReview.prepareOffer(slowRequest),
+      slowOffer,
+      'retry does not extend an existing lease',
+    );
+    const slowSignature = await owner.signOnlyTransaction(
+      ccc.Transaction.fromBytes(slowOffer.unsignedBytes),
+    );
+    const slowReceipt = await slowReview.submit(
+      {
+        offerId: slowOffer.offerId,
+        rawHash: slowOffer.rawHash,
+        userSignedBytes: slowSignature.toHex(),
+      },
+      true,
+    );
+    assert.equal(
+      slowReceipt.ownerSignatureAccepted,
+      true,
+      'timely slow approval survives subsequent validation',
+    );
+    assert.equal(broadcasts, 0, 'durable acknowledgement precedes network submission');
+    now = NOW;
+    console.log(
+      'PASS full bounded signing window starts after validation, preserves idempotency and accepts delayed approval',
+    );
+
     const offer = await service.prepareOffer(request),
       tx = ccc.Transaction.fromBytes(offer.unsignedBytes);
     assert.equal(maxFixtureReads, 4, 'independent provider reads run with at most four in flight');

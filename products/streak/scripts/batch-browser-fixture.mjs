@@ -23,7 +23,12 @@ const script = (value) => ({
 });
 const json = (value) => JSON.parse(ccc.stringify(value));
 
-export async function batchChain(cutoffMs, deps = BATCH_MANIFEST.codeDeps, ownerEvmAddress) {
+export async function batchChain(
+  cutoffMs,
+  deps = BATCH_MANIFEST.codeDeps,
+  ownerEvmAddress,
+  reviewWindowMs = 90_000,
+) {
   const rpc = new ccc.ClientPublicTestnet({ url: 'https://testnet.ckb.dev/', fallbacks: [] });
   // No code-dependency upgrades exist in this synthetic chain.
   rpc.findSingletonCellByType = async () => undefined;
@@ -252,7 +257,7 @@ export async function batchChain(cutoffMs, deps = BATCH_MANIFEST.codeDeps, owner
     const offer = await parseBatchOffer({
       version: 'atomic-predictions-v1',
       offerId: crypto.randomUUID(),
-      expiresAt: Date.now() + 90_000,
+      expiresAt: Math.min(Date.now() + reviewWindowMs, cutoffMs - 120_000),
       rawHash: prepared.hash(),
       unsignedBytes: prepared.toHex(),
       sponsorLock: script(sponsor),

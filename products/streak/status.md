@@ -1,5 +1,12 @@
 # Streak status
 
+18 November fresh-payment timing patch is prepared: a complete five-minute atomic
+review window, pre-wallet expiry guard and removal of redundant pre-delivery reads.
+27 focused client tests, the isolated backend batch suite, strict TypeScript and
+independent review pass. The owner explicitly deferred the long release gate until
+hosted payments work. Publication and physical-wallet confirmation are separate;
+see [timing evidence](docs/delivery/fresh-payment-timing-2026-11-18.md). The earlier 105-stage pass does not cover this patch.
+
 18 November payment recovery release: [ecf5b26](https://github.com/HeySomtee/streak/commit/ecf5b26caf219ac2e99095bebf4eac7e44bc942e)
 is published. All 105 local release stages passed in one complete run, finished
 17 November at 20:08 UTC on Node 24.14.0; independent money/recovery review found
