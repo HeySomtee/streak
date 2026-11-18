@@ -72,8 +72,11 @@ Permanent node rejection or genuine competing spends retain conservative recover
 - The 15 host lifecycle regressions passed during readiness investigation.
 - Independent money/recovery review found no concrete blocker in the final scope.
   The reviewer inspected code and tests; it did not perform a live transaction.
-- Final integrated browser and complete release gate results are recorded below
-  when completed. Earlier interrupted readiness verification is not a pass.
+- All four integrated Chromium/WebKit desktop/mobile journeys passed.
+- The complete release gate passed all 105 stages on Node 24.14.0, finishing
+  17 November at 20:08:11 UTC. The exact-tree receipt covers
+  `5d2994be8f0922a50c032f44590c3da9b801eac1`. Earlier interrupted verification
+  and the failed first attempt are not passing evidence.
 
 All routine checks use synthetic identities, isolated transports or disposable
 local services. Physical MetaMask/Zerion and hosted recovery remain to verify.
@@ -84,3 +87,18 @@ now validates every attempt against the immutable saved offer, hash and signatur
 including failed attempts. Deterministic client tests retain the backoff assertions;
 browser tests require automatic recovery with no further wallet prompt. The failed
 run is retained in local evidence and is not a passing release gate.
+
+## Publication and public verification
+
+18 November: published as [ecf5b26](https://github.com/HeySomtee/streak/commit/ecf5b26caf219ac2e99095bebf4eac7e44bc942e).
+Commit and push reused the successful full-gate receipt for the exact tree.
+Hosted CI remains paused. The public Season page returned HTTP 200 and served
+`index-C8kdwk10.js`, `batch-client-uQoD6p4b.js` and `batch-ui-Rq1bgeno.js`; all
+three downloaded assets matched the verified local build byte-for-byte. This
+establishes public frontend publication, not physical-wallet or backend payment
+acceptance. The original reported payment has not been declared recovered.
+
+Local evidence is retained in `.quality-artifacts/all.json`, the exact-tree hook
+receipt and `.quality-artifacts/payment-handoff-2026-11-17/`. The first failed
+attempt is preserved separately. The owner's unrelated acceptance checklist is
+restored after publication and is not included in this release.

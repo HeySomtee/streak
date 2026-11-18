@@ -1,5 +1,15 @@
 # Streak status
 
+18 November payment recovery release: [ecf5b26](https://github.com/HeySomtee/streak/commit/ecf5b26caf219ac2e99095bebf4eac7e44bc942e)
+is published. All 105 local release stages passed in one complete run, finished
+17 November at 20:08 UTC on Node 24.14.0; independent money/recovery review found
+no concrete blocker. Public Season and its payment chunks match the verified
+build byte-for-byte. The release includes the sponsor readiness correction.
+Physical-wallet acceptance, the original payment's private receipt and new v5
+market activation remain separate outstanding checks. Earlier pending-gate notes
+below are historical. Preserve the owner's unrelated acceptance checklist and
+all earlier commitments.
+
 17 November payment handoff correction implemented locally: saved server acceptance,
 automatic delivery recovery and safe expiry retirement replace stranded pre-broadcast
 states. Focused tests and independent review pass; complete release verification,
