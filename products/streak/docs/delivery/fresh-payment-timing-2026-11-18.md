@@ -45,3 +45,11 @@ Hosted wallet acceptance remains required. Existing recovery work, operator
 contention, failed validation or outages can still prevent acceptance. No old
 signature is renewed or rewritten, and no payment is labelled confirmed without
 chain evidence. Preserve the owner's unrelated acceptance checklist.
+
+## Publication
+
+Published [265ccd9](https://github.com/HeySomtee/streak/commit/265ccd93841c0a47cfb407437b7152c075754912).
+On 18 November at 06:12:54 UTC the public Season page returned HTTP 200 with
+`index-BoTkwRw2.js`. That asset and `batch-client-CAeoa_c6.js` matched the local
+production build byte-for-byte. This verifies frontend publication, not successful
+physical-wallet payment. The owner can now refresh and perform a fresh review.
