@@ -25,10 +25,16 @@ import {
 } from './modules/direct/provision';
 import { OperatorJournal, operationKey } from './modules/direct/journal';
 import {
+  assertQueuedCreationAvailable,
   operatorFundingBarrier,
   assertFreshOperatorInputs,
   loadOperatorDeployment,
 } from './modules/direct/cli';
+import {
+  commitQueuedFixtures,
+  queuedFixtureIds,
+  parseQueuedFixtureIds,
+} from './modules/direct/queued-fixtures';
 import { workerCycle } from './modules/direct/worker';
 
 const NOW = 1_800_000_000_000;
@@ -139,6 +145,27 @@ async function main(): Promise<void> {
       'http://127.0.0.1/api/direct/fixtures?key=secret',
     ])
       assert.throws(() => provisioningCatalogueUrl(bad));
+    assert.equal(
+      provisioningCatalogueUrl('http://127.0.0.1:4100/api/direct/fixtures', true),
+      'http://127.0.0.1:4100/api/direct/fixtures?scope=queued',
+    );
+    commitQueuedFixtures(directory, ['api-football-1']);
+    commitQueuedFixtures(directory, ['api-football-2']);
+    assert.deepEqual([...queuedFixtureIds(directory)], ['api-football-1', 'api-football-2']);
+    assert.throws(() => parseQueuedFixtureIds(['api-football-1', 'api-football-1']));
+    assert.throws(() => parseQueuedFixtureIds(['../operator.lock']));
+    assert.throws(() =>
+      parseQueuedFixtureIds(Array.from({ length: 513 }, (_, i) => `api-football-${i + 1}`)),
+    );
+    const oldRegistry = new DirectRegistry(join(directory, 'generation-old'), PUBLIC_DIRECT_CONFIG);
+    oldRegistry.add(record(catalogue.fixtures[0]));
+    const generationJournal = new OperatorJournal(join(directory, 'generation-journal'));
+    assert.throws(
+      () =>
+        assertQueuedCreationAvailable('api-football-1', generationJournal, [oldRegistry], H('a')),
+      /earlier payment flow/,
+    );
+    assertQueuedCreationAvailable('api-football-2', generationJournal, [oldRegistry], H('a'));
     verifyProvisionFixture(fixture(1), catalogue.fixtures[0]);
     assert.throws(
       () =>
@@ -348,6 +375,11 @@ async function main(): Promise<void> {
     const current = record(catalogue.fixtures[0]);
     current.creationTxHash = tx.hash();
     const operation = journal.persist('create', current, tx, NOW);
+    assert.throws(
+      () => assertQueuedCreationAvailable(current.fixtureId, journal, [], H('a')),
+      /earlier payment flow/,
+      'unpublished signed creation prevents cross-generation reservation',
+    );
     assert.throws(() => assertFreshOperatorInputs(journal, tx), /already belongs/);
     const unrelated = tx.clone();
     unrelated.inputs[0].previousOutput.txHash = H('a');

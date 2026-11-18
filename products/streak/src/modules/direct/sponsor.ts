@@ -1,3 +1,4 @@
+import { queuedFixtureIds } from './queued-fixtures';
 import * as ccc from '@ckb-ccc/core';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Match } from '../../types';
@@ -356,6 +357,8 @@ export class SponsorService {
           throw Error('Request identity already belongs to another prediction');
         return prior.offer;
       }
+      if (queuedFixtureIds(this.options.journal.directory).has(request.fixtureId))
+        throw Error('This fixture uses signed queued payments. Refresh payment options.');
       this.options.journal.assertAvailableSlot();
       if (this.options.registry.all().length >= 256)
         throw Error(

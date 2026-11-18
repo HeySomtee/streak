@@ -21,6 +21,42 @@ let instance: CampaignService | undefined;
 let storage: PgCampaignStorage | undefined;
 let reconciling: Promise<void> | undefined;
 let lastDrainFailed = false;
+let commitmentCache:
+  { until: number; rows: { fixtureId: string; marketKey: string }[] } | undefined;
+let commitmentRevision = 0;
+let commitmentRead: Promise<{ fixtureId: string; marketKey: string }[]> | undefined;
+export function invalidateCampaignMarketCommitments(): void {
+  commitmentRevision++;
+  commitmentCache = undefined;
+}
+export async function campaignMarketCommitments() {
+  if (!campaignPaymentsEnabled()) return [];
+  if (commitmentCache && commitmentCache.until > Date.now()) return commitmentCache.rows;
+  if (!commitmentRead) {
+    campaignService();
+    const revision = commitmentRevision;
+    commitmentRead = storage!
+      .marketCommitments()
+      .then((rows) => {
+        if (revision === commitmentRevision) commitmentCache = { until: Date.now() + 30_000, rows };
+        return rows;
+      })
+      .finally(() => {
+        commitmentRead = undefined;
+      });
+  }
+  return commitmentRead;
+}
+export async function queuedCampaignFixtureIds(): Promise<string[]> {
+  const hash = orderConfig().protocolHash;
+  return [
+    ...new Set(
+      (await campaignMarketCommitments())
+        .filter((row) => row.marketKey === campaignMarketPin(row.fixtureId, hash))
+        .map((row) => row.fixtureId),
+    ),
+  ];
+}
 
 export function campaignEntryPayments() {
   campaignService();
@@ -41,7 +77,14 @@ export function campaignPaymentsEnabled(): boolean {
 /** Uses the same real fixture catalogue and Five rounds as the ordinary game pages. */
 export async function campaignOptions(): Promise<CampaignOptions> {
   const now = Date.now();
-  const queuedRegistry = new DirectRegistry(process.env.STREAK_ORDER_REGISTRY_DIR, orderConfig());
+  const queued = orderConfig();
+  const queuedRegistry = new DirectRegistry(process.env.STREAK_ORDER_REGISTRY_DIR, queued);
+  const earlier = [
+    new DirectRegistry(process.env.STREAK_DIRECT_BATCH_REGISTRY_DIR, V4_DIRECT_CONFIG),
+    new DirectRegistry(process.env.STREAK_DIRECT_REGISTRY_DIR),
+    new DirectRegistry(process.env.STREAK_DIRECT_LEGACY_REGISTRY_DIR),
+  ];
+  const commitments = await campaignMarketCommitments();
   const fixtures = await read((db) =>
     db.markets.flatMap((market) => {
       const match = db.matches.find((row) => row.id === market.matchId);
@@ -62,7 +105,16 @@ export async function campaignOptions(): Promise<CampaignOptions> {
           marketId: market.id,
           marketKey: campaignMarketPin(
             match.id,
-            queuedRegistry.get(match.id)?.type.codeHash ?? V4_DIRECT_CONFIG.protocolHash,
+            queuedRegistry.get(match.id)?.type.codeHash ??
+              (queued.codeDeps.length === 2 &&
+              !earlier.some((registry) => registry.get(match.id)) &&
+              !commitments.some(
+                (row) =>
+                  row.fixtureId === match.id &&
+                  row.marketKey !== campaignMarketPin(match.id, queued.protocolHash),
+              )
+                ? queued.protocolHash
+                : V4_DIRECT_CONFIG.protocolHash),
           ),
           home: match.home.name,
           away: match.away.name,
@@ -143,6 +195,21 @@ export function campaignService(): CampaignService {
       activity: () => activityService()?.store,
       five: () => fiveService().campaignStore,
       options: campaignOptions,
+      prepareMarkets: async (fixtures) => {
+        const ids = fixtures
+          .filter((f) => f.marketKey === campaignMarketPin(f.fixtureId, orderConfig().protocolHash))
+          .map((f) => f.fixtureId);
+        if (ids.length) {
+          try {
+            await sponsorProxy('/orders/reserve-markets', { fixtureIds: ids });
+          } catch {
+            throw new CampaignError(
+              'A selected market already has a payment in progress or could not be reserved. Refresh the competition fixtures and try publishing again.',
+              409,
+            );
+          }
+        }
+      },
       absence: (fixtures) => sponsorProxy('/campaign/absence', { fixtures }),
       validateReceivingAddress: validateCampaignAddress,
     }),

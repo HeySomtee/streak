@@ -258,7 +258,10 @@ function buildConfig(env) {
         STREAK_DIRECT_CATALOGUE_URL: catalogue,
         ...pick(env, ['STREAK_CAMPAIGNS_EMPTY_HISTORY_ACK']),
       },
-      worker: operator,
+      worker: {
+        ...operator,
+        ...(env.STREAK_ORDER_PROTOCOL_TX_HASH ? { STREAK_DIRECT_CATALOGUE_URL: catalogue } : {}),
+      },
       ...(rewards ? { rewards } : {}),
       ...(testRewards ? { testRewards } : {}),
     },

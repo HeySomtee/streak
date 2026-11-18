@@ -1,5 +1,35 @@
 # Streak work tracker
 
+18 November release direction: the owner requested "push skip tests" for this
+release. Commit and push hooks are skipped for this publication only; no tests
+are rerun. Earlier focused evidence remains recorded, and the full release gate
+and hosted physical-wallet acceptance remain outstanding.
+
+18 November active follow-up: integrate v5 provisioning for newly published
+prediction competitions, with a durable generation reservation before publication.
+Existing v4 markets and older competition pins remain unchanged. No Render access
+or hosted funding performed. Owner also requested persistent payment completion
+and placement timestamps in Activity. Checkout monitors now survive empty drafts,
+one tracker has priority, and confirmation remains dismissible inside an open slip.
+Activity preserves the original canonical deposit timestamp instead of dropping it.
+Focused local checks pass; see [activation and receipts](delivery/queue-activation-2026-11-18.md).
+Full release gate remains deferred by owner. Publication and physical-wallet
+acceptance remain outstanding; earlier unfinished commitments below remain in scope.
+
+18 November owner correction: the visible wait-before-review queue is not the
+requested sign-once experience. A fresh public `/api/direct/orders/configuration`
+read confirms `enabled: true` with `markets: []`. `PaymentCheckout` routes picks
+without a matching v5 descriptor into `BatchCheckout`, which explains the old
+waiting screen. Deployment of the v5 code did not complete market activation.
+The operator supports `create FIXTURE_ID --queued`, but deliberately rejects
+fixtures already registered under older generations. Demand checkout still creates
+v4 markets. Outstanding: integrate new-market provisioning with the signed queue,
+prepare and activate suitable v5 fixtures, preserve existing positions and recovery,
+and verify three signed slips continuing after browser closure with physical wallets.
+Do not describe the legacy unsigned wait or a deployed empty v5 registry as the
+requested production queue. No runtime or hosted funding change made in this
+investigation; earlier payment fixes and unfinished commitments remain in scope.
+
 18 November fresh-payment timing patch [265ccd9](https://github.com/HeySomtee/streak/commit/265ccd93841c0a47cfb407437b7152c075754912)
 is published: a complete five-minute atomic review window, pre-wallet expiry guard
 and removal of redundant pre-delivery reads. Public frontend assets match the build.

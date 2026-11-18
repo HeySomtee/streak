@@ -38,6 +38,8 @@ export interface OrderConfig {
   maxExecutionFeeShannons: string;
   maxPendingPerWallet: number;
   markets: OrderMarket[];
+  plannedFixtureIds?: string[];
+  reservedFixtureIds?: string[];
 }
 export interface OrderRequest {
   requestId: string;

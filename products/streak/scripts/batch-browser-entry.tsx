@@ -26,6 +26,7 @@ declare global {
 const cache = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 const store = new DraftStore(localStorage);
 export const draft = () => store.getSnapshot().draft;
+export const clearDraft = () => store.clear();
 export const replaceAccount = (account: Account | null) => cache.setQueryData(['account'], account);
 export const changeStake = (index: number, value: string) =>
   store.amount(draft().picks[index].lineId, value);

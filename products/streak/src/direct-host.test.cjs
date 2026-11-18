@@ -450,3 +450,16 @@ for (const scenario of [
       assert.ok(logs.some((line) => line.includes('Settlement pass failed')));
   });
 }
+
+test('v5 activation forwards only the loopback catalogue to the existing worker', () => {
+  const env = sample(path.resolve(os.tmpdir(), 'synthetic-streak-mount'));
+  env.STREAK_ORDER_PROTOCOL_TX_HASH = '0x' + '44'.repeat(32);
+  env.STREAK_ORDER_REGISTRY_DIR = path.join(env.STREAK_HOST_STATE_DIR, 'v5');
+  const { environments } = buildConfig(env);
+  assert.equal(
+    environments.worker.STREAK_DIRECT_CATALOGUE_URL,
+    'http://127.0.0.1:10000/api/direct/fixtures',
+  );
+  assert.equal(environments.worker.DATABASE_URL, undefined);
+  assert.equal(environments.worker.STREAK_SPONSOR_IPC_SECRET, undefined);
+});

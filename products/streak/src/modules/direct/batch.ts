@@ -1,3 +1,4 @@
+import { queuedFixtureIds } from './queued-fixtures';
 import * as ccc from '@ckb-ccc/core';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Match } from '../../types';
@@ -269,6 +270,11 @@ export class BatchService extends SponsorService {
         if (prior.requestDigest !== digest) throw Error('Request identity belongs to another slip');
         return atomicOffer(prior.offer);
       }
+      const queuedFixtures = queuedFixtureIds(this.options.journal.directory);
+      if (request.picks.some((pick) => queuedFixtures?.has(pick.fixtureId)))
+        throw Error(
+          'These competition markets use signed queued payments. Refresh payment options; your picks are saved.',
+        );
       const queue = new ReviewQueue(this.options.journal.directory, () => this.now());
       const position = queue.touch(request.requestId, request.ownerAddress, digest);
       if (position > 1) throw new ReviewWaitingError(position);

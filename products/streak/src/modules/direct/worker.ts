@@ -13,6 +13,7 @@ import {
   parseProvisionCatalogue,
   provisionCycle,
   provisioningCatalogueUrl,
+  type ProvisionCatalogue,
 } from './provision';
 import {
   DirectRegistry,
@@ -147,10 +148,18 @@ export async function runWorkerOnce(stopping: () => boolean = () => false): Prom
   const batchRegistry = batchDirectory
     ? new DirectRegistry(batchDirectory, V4_DIRECT_CONFIG)
     : undefined;
-  if (batchRegistry) {
-    registry.publicationTargets = [batchRegistry];
-    batchRegistry.publicationTargets = [registry];
-  }
+  const queuedConfig = orderConfig();
+  const queuedRegistry =
+    queuedConfig.codeDeps.length === 2 && process.env.STREAK_ORDER_REGISTRY_DIR
+      ? new DirectRegistry(process.env.STREAK_ORDER_REGISTRY_DIR, queuedConfig)
+      : undefined;
+  const registries = [
+    registry,
+    ...(batchRegistry ? [batchRegistry] : []),
+    ...(queuedRegistry ? [queuedRegistry] : []),
+  ];
+  for (const target of registries)
+    target.publicationTargets = registries.filter((other) => other !== target);
   const client = new ccc.ClientPublicTestnet({
     url: PUBLIC_DIRECT_CONFIG.rpc,
     fallbacks: [],
@@ -161,7 +170,7 @@ export async function runWorkerOnce(stopping: () => boolean = () => false): Prom
     if (stopping()) return;
     const catalogueUrl = process.env.STREAK_DIRECT_CATALOGUE_URL;
     const progressDirectory = process.env.STREAK_DIRECT_PROGRESS_DIR;
-    if (!!catalogueUrl !== !!progressDirectory)
+    if (!queuedRegistry && !!catalogueUrl !== !!progressDirectory)
       throw Error(
         'Configure both the local fixture catalogue and separate public progress directory',
       );
@@ -171,19 +180,25 @@ export async function runWorkerOnce(stopping: () => boolean = () => false): Prom
         [resolve(directory), resolve(registryDirectory)].includes(resolve(progressDirectory)))
     )
       throw Error('Use a separate absolute public progress directory');
-    // Demand creation is the product default. Historical bulk creation requires an
-    // explicit operator mode; its signed transactions and lifecycle remain intact.
+    // Only administrator-published v5 competition fixtures fund automatically.
+    // Ordinary catalogue browsing never authorizes bulk spending.
     const queue =
-      catalogueUrl && process.env.STREAK_DIRECT_PROVISION_MODE === 'bulk-v2'
-        ? new ProvisionQueue(join(directory, 'provision-v2'))
-        : undefined;
+      catalogueUrl && queuedRegistry
+        ? new ProvisionQueue(join(directory, 'provision-v5'), queuedConfig.protocolHash)
+        : catalogueUrl && process.env.STREAK_DIRECT_PROVISION_MODE === 'bulk-v2'
+          ? new ProvisionQueue(join(directory, 'provision-v2'))
+          : undefined;
+    let desiredCatalogue: ProvisionCatalogue | undefined;
     let catalogueReady = false;
     if (queue) {
       try {
-        const payload = await boundedJson(provisioningCatalogueUrl(catalogueUrl!), {
-          headers: { accept: 'application/json' },
-        });
-        queue.synchronize(parseProvisionCatalogue(payload, Date.now()), Date.now());
+        const payload = await boundedJson(
+          provisioningCatalogueUrl(catalogueUrl!, !!queuedRegistry),
+          {
+            headers: { accept: 'application/json' },
+          },
+        );
+        desiredCatalogue = parseProvisionCatalogue(payload, Date.now());
         catalogueReady = true;
       } catch {
         queue.status = 'waiting-catalogue';
@@ -196,7 +211,7 @@ export async function runWorkerOnce(stopping: () => boolean = () => false): Prom
         ...archivedRegistry.all(),
         ...registry.all(),
         ...(batchRegistry?.all() ?? []),
-        ...new DirectRegistry(process.env.STREAK_ORDER_REGISTRY_DIR, orderConfig()).all(),
+        ...(queuedRegistry?.all() ?? []),
       ].map((record) => [record.id, record]),
     );
     const conflictState = await canonicalSponsorConflicts(client, journal.directory);
@@ -214,6 +229,20 @@ export async function runWorkerOnce(stopping: () => boolean = () => false): Prom
       if (creation && !conflictState.resolved.has(creation.transactionHash))
         for (const descriptor of creation.creations ?? [creation.descriptor])
           if (!records.has(descriptor.id)) records.set(descriptor.id, descriptor);
+    }
+    if (queue && desiredCatalogue) {
+      if (queuedRegistry) {
+        const earlier = new Set(
+          [...records.values()]
+            .filter((record) => record.type.codeHash !== queuedConfig.protocolHash)
+            .map((record) => record.fixtureId),
+        );
+        desiredCatalogue = {
+          ...desiredCatalogue,
+          fixtures: desiredCatalogue.fixtures.filter((fixture) => !earlier.has(fixture.fixtureId)),
+        };
+      }
+      queue.synchronize(desiredCatalogue, Date.now());
     }
     const checkpointFile = join(directory, 'worker-checkpoints.json');
     const checkpoints: Record<string, { observedAtMs: number; closed: boolean }> = {};
@@ -324,7 +353,7 @@ export async function runWorkerOnce(stopping: () => boolean = () => false): Prom
       try {
         await provisionCycle(queue, {
           now: Date.now,
-          registered: () => registry.all(),
+          registered: () => (queuedRegistry ?? registry).all(),
           barrier: () => operatorFundingBarrier(client, journal, registry),
           async available() {
             const signer = new ccc.SignerCkbPrivateKey(
@@ -353,15 +382,21 @@ export async function runWorkerOnce(stopping: () => boolean = () => false): Prom
               .reduce((sum, cell) => sum + cell.cellOutput.capacity, 0n);
           },
           create: (entry) =>
-            runOperator(['create', entry.fixtureId, '--broadcast'], {
-              expectedFixture: entry,
-              quiet: true,
-            }),
+            runOperator(
+              ['create', entry.fixtureId, ...(queuedRegistry ? ['--queued'] : []), '--broadcast'],
+              {
+                expectedFixture: entry,
+                quiet: true,
+              },
+            ),
           resume: (entry) =>
-            runOperator(['create', entry.fixtureId, '--broadcast'], {
-              expectedFixture: entry,
-              quiet: true,
-            }),
+            runOperator(
+              ['create', entry.fixtureId, ...(queuedRegistry ? ['--queued'] : []), '--broadcast'],
+              {
+                expectedFixture: entry,
+                quiet: true,
+              },
+            ),
         });
       } catch {
         queue.status = 'blocked-review';

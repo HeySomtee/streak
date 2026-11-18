@@ -19,7 +19,13 @@ import type { BatchClient, BatchReview, BatchRecovery } from './batch-client';
 import type { BatchRecord } from './batch-journal';
 import { Notice } from '../../components/notice';
 import { PaymentSummary } from './payment-invoice';
-import { PaymentProgress, PaymentButtonState, type PaymentStage } from './payment-progress';
+import {
+  PaymentProgress,
+  PaymentButtonState,
+  type PaymentStage,
+  type PaymentPresentation,
+  paymentIsPending,
+} from './payment-progress';
 import { waitForReviewRetry } from './review-wait';
 
 const money = (value: string | bigint) => `${displayShannons(value)} tCKB`;
@@ -288,7 +294,13 @@ export function BatchCheckout({
   view = 'picks',
   onActivity,
   campaigns = [],
+  checkoutEnabled = true,
+  onProgress,
+  progressVisible = true,
 }: {
+  checkoutEnabled?: boolean;
+  onProgress?: (value: PaymentPresentation | null) => void;
+  progressVisible?: boolean;
   store: DraftStore;
   account: Account | null;
   accountReady: boolean;
@@ -334,11 +346,11 @@ export function BatchCheckout({
   const config = useQuery({
     queryKey: ['batch-config'],
     queryFn: ({ signal }) => getBatchConfig(signal),
-    enabled: active && snapshot.draft.picks.length > 0,
+    enabled: checkoutEnabled && active && snapshot.draft.picks.length > 0,
     staleTime: 15_000,
     retry: false,
     refetchInterval: (query) =>
-      active
+      checkoutEnabled && active
         ? query.state.data?.enabled === false || query.state.status === 'error'
           ? 5_000
           : 30_000
@@ -625,9 +637,10 @@ export function BatchCheckout({
     release.isPending ||
     (submit.isPending && saved?.identityKey !== identityKey);
   useEffect(() => {
+    if (!checkoutEnabled) return;
     onBusy(editingLocked);
     return () => onBusy(false);
-  }, [editingLocked, onBusy]);
+  }, [editingLocked, onBusy, checkoutEnabled]);
   const result = receipt?.identityKey === identityKey ? receipt.result : null;
   const currentRecord = saved?.identityKey === identityKey ? saved.record : result?.record;
   const background = useQuery({
@@ -718,8 +731,31 @@ export function BatchCheckout({
             : error
               ? 'not-sent'
               : null;
+  const progressKey = currentRecord?.hash ?? identityKey;
+  const presentationToken = `${progressKey}:${stage}`;
+  const progressCreatedAt = currentRecord?.createdAt ?? prepare.submittedAt;
+  useEffect(() => {
+    onProgress?.(
+      stage && dismissedHash !== presentationToken
+        ? {
+            key: progressKey,
+            pending: paymentIsPending(stage, terminal),
+            createdAt: progressCreatedAt,
+          }
+        : null,
+    );
+  }, [
+    onProgress,
+    stage,
+    progressKey,
+    progressCreatedAt,
+    terminal,
+    dismissedHash,
+    presentationToken,
+  ]);
+  useEffect(() => () => onProgress?.(null), [onProgress]);
   return (
-    <section className="batch-checkout" aria-label="Slip payment">
+    <section className="batch-checkout" aria-label="Slip payment" hidden={!checkoutEnabled}>
       {activityTarget &&
         createPortal(
           <>
@@ -776,13 +812,15 @@ export function BatchCheckout({
         )}
       {stage && onOpen && (
         <PaymentProgress
+          suppressed={!progressVisible}
+          inlineTarget={feedbackTarget}
           operationKey={currentRecord?.hash ?? identityKey}
           stage={stage}
           terminal={terminal}
           count={currentRecord?.offer.lines.length ?? snapshot.draft.picks.length}
-          hidden={active || (!!currentRecord && terminal && dismissedHash === currentRecord.hash)}
+          hidden={active || dismissedHash === presentationToken}
           onOpen={onOpen}
-          onDismiss={terminal ? () => setDismissedHash(currentRecord!.hash) : undefined}
+          onDismiss={() => setDismissedHash(presentationToken)}
         >
           {currentRecord && linked.data ? (
             <BatchTransaction
@@ -893,7 +931,9 @@ export function BatchCheckout({
                     ))}
                   </ul>
                 );
-                return feedbackTarget ? createPortal(choices, feedbackTarget) : choices;
+                return checkoutEnabled && feedbackTarget
+                  ? createPortal(choices, feedbackTarget)
+                  : choices;
               })()}
               {release.error && (
                 <p className="pick-error" role="alert">
@@ -1050,7 +1090,9 @@ export function BatchCheckout({
                 )}
               </>
             );
-            return feedbackTarget ? createPortal(notices, feedbackTarget) : notices;
+            return checkoutEnabled && feedbackTarget
+              ? createPortal(notices, feedbackTarget)
+              : notices;
           })()}
         </>
       )}

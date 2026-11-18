@@ -27,7 +27,7 @@ import { survivorService, tickSurvivor } from './modules/survivor/runtime';
 import { SurvivorError } from './modules/survivor/domain';
 import { fiveService, startFiveProgression } from './modules/five/runtime';
 import { FiveError } from './modules/five/domain';
-import { campaignService, campaignEntryPayments, campaignPaymentsEnabled, reconcileCampaigns, startCampaigns } from './modules/campaigns/runtime';
+import { campaignService, campaignEntryPayments, campaignPaymentsEnabled, reconcileCampaigns, startCampaigns, queuedCampaignFixtureIds, invalidateCampaignMarketCommitments } from './modules/campaigns/runtime';
 import { entryPaymentOffer, orderEntryOffer, regularOnlySelection } from './modules/campaigns/entry-payments';
 import { CampaignError, identifier as campaignId, object as campaignObject } from './modules/campaigns/domain';
 import { campaignEvidenceExport, campaignEvidenceCsv } from './modules/campaigns/evidence';
@@ -321,6 +321,7 @@ async function handleCampaigns(req: IncomingMessage, res: ServerResponse, url: U
         return sendJson(res, 200, await service.recordPayout(id, publicId, proof, actor));
       }
       const data = await service.act(body, actor);
+      if (['publish', 'delete'].includes(String(body.action))) invalidateCampaignMarketCommitments();
       if (data.detail && ['join', 'publish'].includes(String(body.action))) void reconcileCampaigns();
       return sendJson(res, 200, data);
     }
@@ -1519,9 +1520,10 @@ async function handleOrders(
 ): Promise<void> {
   if (action === 'configuration') {
     try {
-      return sendJson(res, 200, await sponsorProxy('/orders/configuration'));
+      const result = campaignObject(await sponsorProxy('/orders/configuration'));
+      return sendJson(res, 200, { ...result, plannedFixtureIds: result.enabled ? await queuedCampaignFixtureIds() : [] });
     } catch {
-      return sendJson(res, 200, { enabled: false });
+      return sendJson(res, 503, { error: 'Payment options could not refresh. Your picks are saved; please retry.' });
     }
   }
   const user=await requireUser(req,res); if(!user)return;
@@ -1616,14 +1618,15 @@ async function handleDirectMarkets(res: ServerResponse, url: URL): Promise<void>
   sendJson(res, 200, { markets });
 }
 
-async function handleDirectFixtures(res: ServerResponse): Promise<void> {
+async function handleDirectFixtures(res: ServerResponse, queuedOnly = false): Promise<void> {
   const status = providerStatus();
   const coverage = provider.scheduleCoverage?.();
   const fixtures = provider.scheduleFixtures?.();
   if (provider.id !== 'football' || !status.enabled || status.simulated || !coverage || !fixtures)
     return sendJson(res, 503, { error: 'The real football schedule is not ready. Market creation will retry.' });
+  const desired = queuedOnly ? new Set(await queuedCampaignFixtureIds()) : null;
   const owned = fixtures.filter(
-    (match) => isActiveProviderMatch(match) && match.oracle?.source === PROVIDER_ORIGIN,
+    (match) => isActiveProviderMatch(match) && match.oracle?.source === PROVIDER_ORIGIN && (!desired || desired.has(match.id)),
   );
   if (owned.length > PROVISION_QUEUE_LIMIT)
     return sendJson(res, 503, { error: 'The fixture catalogue exceeds the reviewed provisioning bound.' });
@@ -1715,7 +1718,7 @@ const staticRoutes: Record<string, Handler> = {
   "POST /api/direct/sponsor/resolve": (req,res,url)=>handleSponsor(req,res,url,'resolve'),
   "GET /api/direct/sponsor/status": (req,res,url)=>handleSponsor(req,res,url,'status'),
   "GET /api/direct/markets": (_req, res, url) => handleDirectMarkets(res, url),
-  "GET /api/direct/fixtures": (_req, res) => handleDirectFixtures(res),
+  "GET /api/direct/fixtures": (_req, res, url) => handleDirectFixtures(res, url.searchParams.get('scope') === 'queued'),
   "GET /api/direct/provisioning": async (_req, res) => sendJson(res, 200, { progress: readProvisioningProgress(process.env.STREAK_DIRECT_PROGRESS_DIR) ?? null }),
   "POST /api/auth/nonce": (req, res) => handleAuthNonce(req, res),
   "POST /api/auth/verify": (req, res) => handleAuthVerify(req, res),

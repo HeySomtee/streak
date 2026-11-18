@@ -15,7 +15,8 @@ import {
   hash32,
 } from './registry';
 import { OperatorBusyError, OperatorJournal } from './journal';
-import { boundedJson } from './cli';
+import { boundedJson, assertQueuedCreationAvailable } from './cli';
+import { parseQueuedFixtureIds, commitQueuedFixtures } from './queued-fixtures';
 import { provisioningCatalogueUrl } from './provision';
 import { createFixtureReader } from './fixture-reader';
 import { startHostedRecovery } from './hosted-drain';
@@ -122,6 +123,31 @@ export function createSponsorServer(
         const payload = await body(req),
           owner = payload.authenticatedOwnerAddress,
           request = object(payload.request, 'order request');
+        // Internal API-to-signer operation only; no public route exposes this.
+        // CampaignService verifies administrator access and draft terms first.
+        if (url.pathname === '/orders/reserve-markets') {
+          const ids = parseQueuedFixtureIds(request.fixtureIds);
+          await legacy.options.journal.exclusive(async () => {
+            const registries = [
+              legacy.options.registry,
+              ...(batch ? [batch.options.registry] : []),
+              ...(batch?.options.existingRegistry ?? []).filter(
+                (r) => r.config.protocolHash !== orders.options.config.protocolHash,
+              ),
+            ];
+            for (const id of ids) {
+              if (!orders.options.registry.get(id))
+                assertQueuedCreationAvailable(
+                  id,
+                  legacy.options.journal,
+                  registries,
+                  orders.options.config.protocolHash,
+                );
+            }
+            commitQueuedFixtures(legacy.options.journal.directory, ids);
+          });
+          return reply(res, 200, { reserved: ids });
+        }
         if (typeof owner !== 'string' || owner.length > 300)
           throw Error('Authenticated wallet required');
         if (url.pathname === '/orders/wallet') return reply(res, 200, await orders.wallet(owner));

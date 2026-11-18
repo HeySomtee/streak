@@ -71,6 +71,7 @@ export interface CampaignEvidence {
   absenceProofs?: CampaignAbsenceSnapshot[];
 }
 export interface CampaignSources {
+  prepareMarkets?(fixtures: { fixtureId: string; marketKey: string }[]): Promise<void>;
   options(): Promise<CampaignOptions>;
   observe(campaign: Campaign): Promise<CampaignEvidence>;
   validateReceivingAddress?(address: string, amountShannons?: string): Promise<string>;
@@ -324,7 +325,7 @@ export function publishCampaign(c: Campaign, options: CampaignOptions, now: numb
           'Registration must close by the first selected prediction deadline.',
           409,
         );
-      if (!f.marketKey.startsWith('v4:')) c.bindings[id] = f.marketKey;
+      if (!/^v[45]:/.test(f.marketKey)) c.bindings[id] = f.marketKey;
       return f;
     });
   } else {

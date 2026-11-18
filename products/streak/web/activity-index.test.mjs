@@ -219,3 +219,38 @@ test('a pending detail follows its verified birth identity through admission and
     activityPositionKey(descriptor, { ...accepted, id: `${hash('3')}:1` }),
   );
 });
+
+test('placement time survives the activity read model independently of kickoff and settlement', async () => {
+  const raw = page([await group()]);
+  const position = raw.groups[0].snapshot.positions[0];
+  const commit = {
+    blockHash: hash('4'),
+    blockNumber: '183921',
+    timestamp: 1790000000000,
+    transactionIndex: 1,
+    outputIndex: 2,
+  };
+  position.commit = commit;
+  position.status = 'claimed';
+  position.entitlementShannons = '42100000000';
+  position.claimTransactionHash = hash('5');
+  const parsed = await parseActivityPage(raw, account.walletAddress);
+  assert.deepEqual(parsed.groups[0].snapshot.positions[0].commit, commit);
+  assert.notEqual(commit.timestamp, parsed.groups[0].descriptor.cutoffMs);
+  for (const change of [
+    { timestamp: -1 },
+    { timestamp: '1790000000000' },
+    { timestamp: 8640000000000001 },
+    { blockHash: 'bad' },
+    { blockNumber: '1.2' },
+    { transactionIndex: -1 },
+  ]) {
+    position.commit = { ...commit, ...change };
+    await assert.rejects(parseActivityPage(raw, account.walletAddress));
+  }
+  delete position.commit;
+  assert.equal(
+    (await parseActivityPage(raw, account.walletAddress)).groups[0].snapshot.positions[0].commit,
+    undefined,
+  );
+});

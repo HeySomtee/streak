@@ -1,5 +1,9 @@
 # Streak documentation
 
+18 November [queue activation and payment receipts](delivery/queue-activation-2026-11-18.md):
+new competition market provisioning, persistent completion and placement timestamps.
+Local verification and outstanding hosted acceptance are listed separately.
+
 18 November [fresh-payment timing correction](delivery/fresh-payment-timing-2026-11-18.md):
 slow approval expiry, focused verification and owner-deferred full release checks.
 

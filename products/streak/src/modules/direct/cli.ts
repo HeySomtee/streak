@@ -1,4 +1,5 @@
 import * as ccc from '@ckb-ccc/core';
+import { queuedFixtureIds } from './queued-fixtures';
 import { orderConfig } from './order-config';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
@@ -33,6 +34,7 @@ import {
   sponsorFundingBlocked,
   canonicalSponsorConflicts,
   cancelUnsignedSponsorOffers,
+  sponsorStores,
 } from './sponsor-journal';
 import { requestAdmissionDrain, completeAdmissionDrain } from './admission-drain';
 import {
@@ -42,6 +44,54 @@ import {
   validateScheduledFixture,
   type ConfirmedFootballEvidence,
 } from './oracle';
+
+/** Call under the operator lease before creating a new generation for a fixture. */
+export function assertQueuedCreationAvailable(
+  fixtureId: string,
+  journal: OperatorJournal,
+  registries: DirectRegistry[],
+  protocolHash: string,
+): void {
+  const conflict = () => {
+    throw Error(
+      'This fixture already belongs to an earlier payment flow. Its bets and recovery must be preserved.',
+    );
+  };
+  if (registries.some((registry) => registry.get(fixtureId))) conflict();
+  const files = readdirSync(journal.directory).filter((file) => OPERATION_FILE.test(file));
+  if (files.length > 1536) throw Error('Operator journal exceeds its reviewed bound');
+  for (const file of files) {
+    const operation = journal.load(file.slice(0, -5));
+    if (!operation || operation.descriptor.type.codeHash === protocolHash) continue;
+    if (
+      (operation.creations ?? [operation.descriptor]).some(
+        (record) => record.fixtureId === fixtureId,
+      )
+    )
+      conflict();
+  }
+  for (const store of sponsorStores(journal.directory)) {
+    for (const entry of store.all()) {
+      if (
+        !entry.userSignedBytes &&
+        !entry.signedBytes &&
+        (entry.state === 'cancelled' || entry.offer.expiresAt <= Date.now())
+      )
+        continue;
+      const offer = entry.offer as typeof entry.offer & {
+        lines?: { mode: string; fixture: { fixtureId: string } }[];
+      };
+      if (
+        offer.lines
+          ? offer.lines.some(
+              (line) => line.mode === 'create' && line.fixture.fixtureId === fixtureId,
+            )
+          : offer.fixture.fixtureId === fixtureId
+      )
+        conflict();
+    }
+  }
+}
 
 export async function boundedJson(url: string, init: RequestInit): Promise<unknown> {
   const response = await fetch(url, {
@@ -619,7 +669,10 @@ export async function runOperator(
       const signer = new ccc.SignerCkbPrivateKey(client, key);
       let tx: ccc.Transaction;
       if (action === 'create') {
-        if (!queued && queuedRegistry?.get(fixtureId))
+        if (
+          !queued &&
+          (queuedRegistry?.get(fixtureId) || queuedFixtureIds(journal.directory).has(fixtureId))
+        )
           throw Error('This fixture uses queued payments. Preserve its existing market.');
         const fixture = validateScheduledFixture(
           await fixturePayload(providerFixtureId),
@@ -627,9 +680,16 @@ export async function runOperator(
           Date.now(),
         );
         if (options_.expectedFixture) verifyProvisionFixture(fixture, options_.expectedFixture);
-        if (queued && (legacyRegistry.get(fixtureId) || batchRegistry?.get(fixtureId)))
-          throw Error(
-            'Keep existing market generations. Choose an uncreated fixture for queued payments.',
+        if (queued)
+          assertQueuedCreationAvailable(
+            fixtureId,
+            journal,
+            [
+              legacyRegistry,
+              ...(batchRegistry ? [batchRegistry] : []),
+              new DirectRegistry(process.env.STREAK_DIRECT_LEGACY_REGISTRY_DIR),
+            ],
+            queuedConfig.protocolHash,
           );
         const prepared = await buildCreate(client, signer, fixture, Date.now(), config);
         record = prepared.record;
@@ -663,7 +723,7 @@ export async function runOperator(
     if (action !== 'create') completeAdmissionDrain(journal.directory, operation.operationId);
     if (shouldBroadcast && action === 'create' && options_.expectedFixture) {
       if (
-        operation.descriptor.type.codeHash !== PUBLIC_DIRECT_CONFIG.protocolHash ||
+        operation.descriptor.type.codeHash !== config.protocolHash ||
         operation.descriptor.cutoffMs !== options_.expectedFixture.kickoffMs
       )
         throw Error(

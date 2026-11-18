@@ -37,6 +37,22 @@ function amount(value: unknown): string {
   if (typeof value !== 'string' || !/^(0|[1-9][0-9]{0,30})$/.test(value)) throw error();
   return value;
 }
+function depositCommit(value: unknown): NonNullable<ActivityPosition['commit']> {
+  const c = object(value);
+  if (
+    typeof c.blockNumber !== 'string' ||
+    !/^(0|[1-9][0-9]{0,19})$/.test(c.blockNumber) ||
+    BigInt(c.blockNumber) > U64_MAX
+  )
+    throw error();
+  return {
+    blockHash: hex(c.blockHash, 32),
+    blockNumber: c.blockNumber,
+    timestamp: integer(c.timestamp, 1, 8_640_000_000_000_000),
+    transactionIndex: integer(c.transactionIndex, 0, 0xffffffff),
+    outputIndex: integer(c.outputIndex, 0, 0xffffffff),
+  };
+}
 function position(value: unknown): ActivityPosition {
   const p = object(value),
     out = object(p.outPoint);
@@ -61,6 +77,7 @@ function position(value: unknown): ActivityPosition {
     entitlementShannons,
     outPoint: { txHash: hex(out.txHash, 32), index: integer(out.index, 0, 0xffffffff) },
     transactionHash: hex(p.transactionHash, 32),
+    ...(p.commit === undefined ? {} : { commit: depositCommit(p.commit) }),
     ...(p.claimTransactionHash === undefined
       ? {}
       : { claimTransactionHash: hex(p.claimTransactionHash, 32) }),

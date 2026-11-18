@@ -194,7 +194,7 @@ export function verifyProvisionFixture(current: Match, expected: ProvisionFixtur
 }
 
 /** Only an explicit same-machine API URL is accepted, never an arbitrary signing input feed. */
-export function provisioningCatalogueUrl(input: string): string {
+export function provisioningCatalogueUrl(input: string, queuedOnly = false): string {
   const url = new URL(input);
   if (
     url.protocol !== 'http:' ||
@@ -206,6 +206,7 @@ export function provisioningCatalogueUrl(input: string): string {
     url.hash
   )
     throw Error('Provisioning requires the explicit loopback /api/direct/fixtures catalogue');
+  if (queuedOnly) url.searchParams.set('scope', 'queued');
   return url.toString();
 }
 

@@ -204,6 +204,12 @@ export class CampaignService {
     } else if (action === 'publish') {
       this.admin(user);
       const options = await this.sources.options();
+      const preview = await this.store.load(identifier(id));
+      if (!preview) throw new CampaignError('Competition not found.', 404);
+      assertRevision(preview, b.revision);
+      const prepared = structuredClone(preview);
+      publishCampaign(prepared, options, await this.store.clock());
+      await this.sources.prepareMarkets?.(prepared.fixtures);
       await this.store.change(
         identifier(id),
         (c, now) => {

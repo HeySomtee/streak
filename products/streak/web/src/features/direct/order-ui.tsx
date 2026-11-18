@@ -13,53 +13,105 @@ import {
   assertWalletAccount,
   chooseWallet,
 } from '../../lib/wallet';
-import { PaymentProgress, PaymentButtonState } from './payment-progress';
+import { PaymentProgress, PaymentButtonState, type PaymentPresentation } from './payment-progress';
 import { Notice } from '../../components/notice';
 import { useNow } from '../../lib/use-now';
 import './order-ui.css';
 type Props = ComponentProps<typeof BatchCheckout>;
 const money = (n: string | bigint) => `${displayShannons(n)} tCKB`;
-const terminal = (s: OrderStatus) => ['placed', 'refunded', 'failed'].includes(s.state);
+const terminal = (s: OrderStatus) =>
+  ['placed', 'refunded', 'failed', 'cancelled'].includes(s.state);
 export function PaymentCheckout(props: Props) {
   const snapshot = useSyncExternalStore(props.store.subscribe, props.store.getSnapshot);
+  const [batchProgress, setBatchProgress] = useState<PaymentPresentation | null>(null);
+  const [orderProgress, setOrderProgress] = useState<PaymentPresentation | null>(null);
+  const showOrder =
+    !!orderProgress &&
+    (!batchProgress ||
+      Number(orderProgress.pending) > Number(batchProgress.pending) ||
+      (orderProgress.pending === batchProgress.pending &&
+        orderProgress.createdAt >= batchProgress.createdAt));
   const config = useQuery({
     queryKey: ['order-config'],
     queryFn: ({ signal }) => getOrderConfig(signal),
     staleTime: 30_000,
     retry: false,
+    refetchInterval: (q) =>
+      q.state.data?.plannedFixtureIds?.some(
+        (id) =>
+          snapshot.draft.picks.some((p) => p.matchId === id) &&
+          !q.state.data?.markets.some((m) => m.fixtureId === id),
+      )
+        ? 10_000
+        : false,
+    refetchIntervalInBackground: false,
   });
   const queued = config.data;
   const matching =
     queued &&
     snapshot.draft.picks.filter((p) => queued.markets.some((m) => m.fixtureId === p.matchId))
       .length;
-  if (config.isPending) return <PaymentButtonState label="Checking payment options" />;
-  if (config.isError)
-    return (
-      <Notice title="Your picks are saved" tone="attention">
-        <p>{config.error.message}</p>
-        <button className="quiet" onClick={() => void config.refetch()}>
-          Retry payment options
-        </button>
-      </Notice>
-    );
+  const missing = (id: string) =>
+    snapshot.draft.picks.some((p) => p.matchId === id) &&
+    !queued?.markets.some((m) => m.fixtureId === id);
+  const opening = queued?.plannedFixtureIds?.some(missing);
+  const reserved = queued?.reservedFixtureIds?.some(missing);
+  const ready = !config.isPending && !config.isError;
   const orderOnly =
-    !!queued && (!snapshot.draft.picks.length || matching === snapshot.draft.picks.length);
+    ready && !!queued && (!snapshot.draft.picks.length || matching === snapshot.draft.picks.length);
+  const legacyEnabled = ready && !orderOnly && !opening && !reserved && !matching;
   return (
     <>
-      {queued && <OrderCheckout {...props} config={queued} checkoutEnabled={orderOnly} />}
-      {!orderOnly &&
-        (matching ? (
-          <Notice title="Keep these payment versions in separate slips" tone="attention">
-            Some picks use an earlier market. Pay those in a separate slip; each payment keeps its
-            original settlement rules.
-          </Notice>
-        ) : (
-          <BatchCheckout {...props} />
-        ))}
+      {queued && (
+        <OrderCheckout
+          {...props}
+          config={queued}
+          checkoutEnabled={orderOnly}
+          onProgress={setOrderProgress}
+          progressVisible={showOrder}
+        />
+      )}
+      <BatchCheckout
+        {...props}
+        checkoutEnabled={legacyEnabled}
+        onProgress={setBatchProgress}
+        progressVisible={!showOrder}
+      />
+      {config.isPending ? (
+        <PaymentButtonState label="Checking payment options" />
+      ) : config.isError ? (
+        <Notice title="Your picks are saved" tone="attention">
+          <p>{config.error.message}</p>
+          <button className="quiet" onClick={() => void config.refetch()}>
+            Retry payment options
+          </button>
+        </Notice>
+      ) : !orderOnly && (opening || reserved) ? (
+        <Notice
+          title={
+            opening ? "This competition's markets are opening" : 'Market setup is not finished'
+          }
+          tone="info"
+        >
+          <p>
+            {opening
+              ? 'Your picks are saved. Market setup is still confirming. Once open, you can sign a payment and leave Streak to process it.'
+              : 'Your picks are saved. The organizer needs to finish opening this market before payment is available.'}
+          </p>
+          <button className="quiet" onClick={() => void config.refetch()}>
+            Check market setup
+          </button>
+        </Notice>
+      ) : !orderOnly && matching ? (
+        <Notice title="Keep these payment versions in separate slips" tone="attention">
+          Some picks use an earlier market. Pay those in a separate slip; each payment keeps its
+          original settlement rules.
+        </Notice>
+      ) : null}
     </>
   );
 }
+
 export function OrderCheckout(props: Props & { config: OrderConfig; checkoutEnabled?: boolean }) {
   const { store, account, active, onBusy, config, checkoutEnabled = true } = props;
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot),
@@ -78,6 +130,7 @@ export function OrderCheckout(props: Props & { config: OrderConfig; checkoutEnab
     identity: string;
   } | null>(null);
   const [step, setStep] = useState('Preparing your payment');
+  const [dismissedProgress, setDismissedProgress] = useState('');
   const queryClient = useQueryClient(),
     now = useNow(active);
   const client = connection ? new OrderClient(connection.signer, config) : null;
@@ -168,6 +221,26 @@ export function OrderCheckout(props: Props & { config: OrderConfig; checkoutEnab
   const visibleReview = review?.identity === identity && review.stamp === stamp ? review : null;
   const orders = history.data?.orders ?? [],
     pending = orders.filter((s) => !terminal(s));
+  const progressOrder = pending[0] ?? orders[0];
+  const progressKey = progressOrder?.offer.id;
+  const progressCreatedAt = progressOrder?.offer.createdAt ?? 0;
+  const hasPending = pending.length > 0;
+  const presentationToken = `${identity}:${progressKey}:${progressOrder?.state}`;
+  useEffect(() => {
+    props.onProgress?.(
+      progressKey && dismissedProgress !== presentationToken
+        ? { key: progressKey, pending: hasPending, createdAt: progressCreatedAt }
+        : null,
+    );
+  }, [
+    props.onProgress,
+    progressKey,
+    hasPending,
+    progressCreatedAt,
+    dismissedProgress,
+    presentationToken,
+  ]);
+  useEffect(() => () => props.onProgress?.(null), [props.onProgress]);
   const unsent = (local.data ?? []).filter(
     (r) =>
       r.status !== 'discarded' &&
@@ -244,8 +317,10 @@ export function OrderCheckout(props: Props & { config: OrderConfig; checkoutEnab
   return (
     <>
       {props.activityTarget && createPortal(records, props.activityTarget)}
-      {checkoutEnabled && orders.length > 0 && (
+      {orders.length > 0 && (
         <PaymentProgress
+          suppressed={props.progressVisible === false}
+          inlineTarget={props.feedbackTarget}
           stage={
             pending.length ? 'queued' : orders[0]?.state === 'placed' ? 'confirmed' : 'resolved'
           }
@@ -253,7 +328,8 @@ export function OrderCheckout(props: Props & { config: OrderConfig; checkoutEnab
             pending.reduce((n, s) => n + s.offer.markets.length, 0) ||
             orders[0].offer.markets.length
           }
-          hidden={active}
+          hidden={active || dismissedProgress === presentationToken}
+          onDismiss={() => setDismissedProgress(presentationToken)}
           operationKey={orders.map((s) => s.offer.id).join(':')}
           terminal={!pending.length}
           onOpen={() => {

@@ -583,4 +583,14 @@ check('public projections omit private wallet/account links and receiving addres
   );
   assert.throws(() => assertRevision(c, 999), /changed/);
 });
+check('publication keeps both lazy market generations unbound until canonical evidence', () => {
+  for (const version of ['v4', 'v5']) {
+    const pending = structuredClone(options);
+    pending.fixtures[0].marketKey = `${version}:fixture-0`;
+    const c = newCampaign(`pending-${version}`, actor(99), parseDraft(draft()), start);
+    publishCampaign(c, pending, start);
+    assert.equal(c.bindings['fixture-0'], undefined);
+    assert.equal(c.bindings['fixture-1'], 'canonical-1');
+  }
+});
 console.log(`${checks} campaign domain checks passed.`);

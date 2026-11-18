@@ -63,6 +63,14 @@ export async function getOrderConfig(signal?: AbortSignal): Promise<OrderConfig 
     )
       throw Error('Invalid queued-payment deployment.');
   }
+  for (const ids of [value.plannedFixtureIds, value.reservedFixtureIds])
+    if (
+      ids !== undefined &&
+      (!Array.isArray(ids) ||
+        ids.length > 512 ||
+        ids.some((id) => typeof id !== 'string' || !/^api-football-[1-9][0-9]{0,14}$/.test(id)))
+    )
+      throw Error('Queued-market setup could not be verified.');
   configureOrderManifest(value);
   return value as unknown as OrderConfig;
 }

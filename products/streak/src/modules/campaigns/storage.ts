@@ -157,6 +157,22 @@ export class PgCampaignStorage implements CampaignStorage {
     return records.rows.map(({ data, checks }) => withFreshness(data, checks));
   }
 
+  /** Published fixture commitments only. Never hydrate entrant/payment history here. */
+  async marketCommitments(): Promise<{ fixtureId: string; marketKey: string }[]> {
+    await this.init();
+    const result = await this.pool.query<{ fixtureId: string; marketKey: string }>(
+      `SELECT DISTINCT f->>'fixtureId' AS "fixtureId", f->>'marketKey' AS "marketKey"
+       FROM streak_campaigns c CROSS JOIN LATERAL jsonb_array_elements(c.data->'fixtures') f
+       WHERE c.data->'draft'->>'kind'='predictions' AND c.data->>'state'='published'
+         AND c.data->>'deletedAt' IS NULL
+         AND (f->>'cutoffAt')::timestamptz > clock_timestamp() + interval '2 minutes'
+       ORDER BY "fixtureId", "marketKey" LIMIT 513`,
+    );
+    if (result.rows.length > 512)
+      throw new CampaignError('Competition fixture scope exceeds its bound.', 503);
+    return result.rows;
+  }
+
   async dueJobs(limit = 8): Promise<CampaignJob[]> {
     await this.init();
     const result = await this.pool.query<CampaignJob>(

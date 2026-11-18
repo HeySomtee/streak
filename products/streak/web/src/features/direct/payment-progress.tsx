@@ -43,6 +43,22 @@ const copy: Record<PaymentStage, [string, string]> = {
   resolved: ['Payment resolved', 'This payment did not complete. You can review your saved picks.'],
   'not-sent': ['Payment not sent', 'Your picks are saved. Open for details.'],
 };
+export function paymentIsPending(stage: PaymentStage, terminal: boolean): boolean {
+  return (
+    [
+      'preparing',
+      'waiting',
+      'queued',
+      'authorizing',
+      'sending',
+      'processing',
+      'checking',
+      'confirming',
+    ].includes(stage) ||
+    (stage === 'attention' && !terminal)
+  );
+}
+export type PaymentPresentation = { key: string; pending: boolean; createdAt: number };
 export function PaymentProgress({
   stage,
   count,
@@ -52,7 +68,11 @@ export function PaymentProgress({
   hidden,
   operationKey,
   terminal,
+  inlineTarget,
+  suppressed = false,
 }: {
+  inlineTarget?: HTMLElement | null;
+  suppressed?: boolean;
   stage: PaymentStage;
   count: number;
   children?: ReactNode;
@@ -76,7 +96,7 @@ export function PaymentProgress({
     'checking',
     'confirming',
   ].includes(stage);
-  const pending = moving || (stage === 'attention' && !terminal);
+  const pending = paymentIsPending(stage, terminal);
   useEffect(() => setExpanded(false), [operationKey]);
   // Dismiss presentation only. A new operation or status can surface again;
   // the checkout continues monitoring and retains its recovery journal.
@@ -94,9 +114,25 @@ export function PaymentProgress({
     setDismissed(true);
     onDismiss?.();
   }
-  const baseInvisible = hidden || (dismissed && !pending);
+  const baseInvisible = suppressed || hidden || (dismissed && !pending);
   const position = useProgressPosition(pending && !expanded && !baseInvisible);
   const invisible = baseInvisible || position.blocked;
+  if (hidden && !suppressed && stage === 'confirmed' && !dismissed && inlineTarget)
+    return createPortal(
+      <div className="notice" role="status">
+        <strong>{title}</strong>
+        <p>
+          {count} {count === 1 ? 'prediction' : 'predictions'} confirmed on-chain.
+        </p>
+        <button className="quiet" onClick={onOpen}>
+          View payment
+        </button>
+        <button className="quiet" onClick={dismiss} aria-label="Dismiss payment confirmation">
+          Dismiss
+        </button>
+      </div>,
+      inlineTarget,
+    );
   return createPortal(
     <aside
       ref={position.host}

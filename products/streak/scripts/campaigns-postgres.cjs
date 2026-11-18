@@ -95,6 +95,77 @@ async function main() {
         },
       );
     }
+    const setupDeadline = created + 3_600_000;
+    const queueDraft = await storage.create('queue-setup', actor(99).id, (now) =>
+      newCampaign('queue-setup', actor(99), draft(setupDeadline), now),
+    );
+    assert.deepEqual(
+      await storage.marketCommitments(),
+      [],
+      'draft competitions never schedule spending',
+    );
+    let reserved;
+    const setupOptions = options(setupDeadline);
+    setupOptions.fixtures[0].marketKey = 'v5:synthetic-pin';
+    const setupService = new CampaignService(storage, [actor(99).id], {
+      options: async () => setupOptions,
+      prepareMarkets: async (fixtures) => {
+        reserved = fixtures;
+      },
+      evidence: async () => {
+        throw Error('No evidence needed for publication');
+      },
+    });
+    await setupService.act(
+      { action: 'publish', id: queueDraft.id, revision: queueDraft.revision },
+      actor(99),
+    );
+    assert.equal(
+      reserved.length,
+      1,
+      'publication preflight receives validated fixtures, not empty draft',
+    );
+    assert.equal(reserved[0].marketKey, 'v5:synthetic-pin');
+    assert.deepEqual(await storage.marketCommitments(), [
+      { fixtureId: 'fixture-1', marketKey: 'v5:synthetic-pin' },
+    ]);
+    await storage.change(
+      'queue-setup',
+      (current) => {
+        current.deletedAt = new Date().toISOString();
+      },
+      { actorId: actor(99).id, action: 'test-delete' },
+    );
+    assert.deepEqual(
+      await storage.marketCommitments(),
+      [],
+      'deleted competitions stop future provisioning',
+    );
+    const failedDraft = await storage.create('queue-failure', actor(99).id, (now) =>
+      newCampaign('queue-failure', actor(99), draft(setupDeadline), now),
+    );
+    const failingService = new CampaignService(storage, [actor(99).id], {
+      options: async () => setupOptions,
+      prepareMarkets: async (fixtures) => {
+        assert.equal(fixtures.length, 1);
+        throw Error('Earlier generation is reserved');
+      },
+    });
+    await assert.rejects(
+      failingService.act(
+        { action: 'publish', id: failedDraft.id, revision: failedDraft.revision },
+        actor(99),
+      ),
+      /Earlier generation/,
+    );
+    assert.equal((await storage.load(failedDraft.id)).state, 'draft');
+    assert.deepEqual((await storage.load(failedDraft.id)).fixtures, []);
+    // Retire only these isolated fixtures before the independent paging scenario below.
+    await pool.query(
+      "DELETE FROM streak_campaign_audit WHERE campaign_id IN ('queue-setup','queue-failure')",
+    );
+    await pool.query("DELETE FROM streak_campaigns WHERE id IN ('queue-setup','queue-failure')");
+
     const c = await create('concurrent');
     const legacyRehearsal = await create('legacy-rehearsal');
     await storage.change(

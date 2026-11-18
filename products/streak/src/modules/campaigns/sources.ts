@@ -17,6 +17,7 @@ import type {
 
 type FiveReadSource = Pick<FiveStorage, 'load' | 'clock'>;
 export interface CampaignSourceDependencies {
+  prepareMarkets?: CampaignSources['prepareMarkets'];
   activity(): Pick<PgActivityStorage, 'readSources'> | undefined;
   five(): FiveReadSource | undefined;
   options(): Promise<CampaignOptions>;
@@ -292,6 +293,7 @@ export function fiveCampaignEvidence(
 export function createCampaignSources(dependencies: CampaignSourceDependencies): CampaignSources {
   return {
     options: dependencies.options,
+    prepareMarkets: dependencies.prepareMarkets,
     ...(dependencies.validateReceivingAddress
       ? { validateReceivingAddress: dependencies.validateReceivingAddress }
       : {}),

@@ -30,6 +30,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { admissionDrain } from './admission-drain';
 import { orderReservedInputs } from './order-reservations';
 import { readBatch } from './read-batch';
+import { queuedFixtureIds } from './queued-fixtures';
 
 const pointKey = (p: ccc.OutPointLike) => ccc.OutPoint.from(p).toHex();
 const point = (p: ccc.OutPoint): OrderPoint => ({ txHash: p.txHash, index: Number(p.index) });
@@ -86,6 +87,7 @@ export class OrderService {
       reserveShannons: ORDER_RESERVE.toString(),
       maxExecutionFeeShannons: ORDER_MAX_FEE.toString(),
       maxPendingPerWallet: 3,
+      reservedFixtureIds: [...queuedFixtureIds(this.options.journal.directory)],
       markets: this.options.registry
         .all()
         .filter((m) => m.cutoffMs > this.now() + 120_000)

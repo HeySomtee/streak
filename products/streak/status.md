@@ -1,5 +1,11 @@
 # Streak status
 
+18 November local changes: [competition queue activation and payment receipts](docs/delivery/queue-activation-2026-11-18.md).
+Newly published v5 competition fixtures feed the existing operator. Payment
+confirmation survives clearing the slip; Activity shows placement and kickoff
+separately. Focused verification is recorded, with release and hosted acceptance
+still outstanding. Existing v4 markets are not converted.
+
 18 November fresh-payment timing patch [265ccd9](https://github.com/HeySomtee/streak/commit/265ccd93841c0a47cfb407437b7152c075754912)
 is published: a complete five-minute atomic review window, pre-wallet expiry guard
 and removal of redundant pre-delivery reads. Public frontend assets match the build.

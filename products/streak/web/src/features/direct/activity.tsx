@@ -227,7 +227,11 @@ export function Activity({
         `${r.descriptor.label} ${pickName(r)}`.toLowerCase().includes(search.toLowerCase())
       );
     })
-    .sort((a, b) => b.descriptor.cutoffMs - a.descriptor.cutoffMs);
+    .sort(
+      (a, b) =>
+        (b.position.commit?.timestamp ?? 0) - (a.position.commit?.timestamp ?? 0) ||
+        a.key.localeCompare(b.key),
+    );
   const selectedPending = current && pendingClaim(current.position, current.descriptor, records);
   const parts = current && returnParts(current.position);
   const currentReview =
@@ -637,7 +641,7 @@ export function Activity({
                     <article className="activity-bet" key={r.key}>
                       <div className="activity-fixture">
                         <small>
-                          {r.market?.competition ?? 'CKB prediction'} ·{' '}
+                          {r.market?.competition ?? 'CKB prediction'} · Kickoff{' '}
                           {new Date(r.descriptor.cutoffMs).toLocaleString(undefined, {
                             month: 'short',
                             day: 'numeric',
@@ -672,6 +676,20 @@ export function Activity({
                         >
                           {pickName(r)}
                         </span>
+                        <small>
+                          {r.position.commit ? (
+                            <>
+                              Placed{' '}
+                              <time dateTime={new Date(r.position.commit.timestamp).toISOString()}>
+                                {new Date(r.position.commit.timestamp).toLocaleString()}
+                              </time>
+                            </>
+                          ) : r.position.status === 'submitted' ? (
+                            'Placement awaiting confirmation'
+                          ) : (
+                            'Placement time unavailable'
+                          )}
+                        </small>
                       </div>
                       <div className="activity-stake">
                         <small>Stake</small>
@@ -864,6 +882,22 @@ export function Activity({
                 <span>{pickName(current)}</span>
                 <strong>{money(current.position.principalShannons)}</strong>
               </div>
+              <p>
+                {current.position.commit ? (
+                  <>
+                    Placed on-chain{' '}
+                    <time dateTime={new Date(current.position.commit.timestamp).toISOString()}>
+                      {new Date(current.position.commit.timestamp).toLocaleString()}
+                    </time>
+                  </>
+                ) : current.position.status === 'submitted' ? (
+                  'Placement awaiting confirmation'
+                ) : (
+                  'Placement time unavailable'
+                )}
+                <br />
+                Kickoff {new Date(current.descriptor.cutoffMs).toLocaleString()} ? Local time
+              </p>
               <h3>{stateLabels[rowState(current)]}</h3>
               <ol className="activity-timeline">
                 <li>

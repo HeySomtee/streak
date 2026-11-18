@@ -12,6 +12,19 @@ async function main() {
   const { ccc } = await import('@ckb-ccc/core');
   const { batchChain } = await import('./batch-browser-fixture.mjs');
   const { BATCH_MANIFEST, MANIFEST } = await import('../web/src/features/direct/protocol.ts');
+  const { ORDER_PROTOCOL_HASH, ORDER_RESERVE, ORDER_MAX_FEE } =
+    await import('../shared/order-codec.mjs');
+  const orderConfig = {
+    enabled: true,
+    protocolHash: ORDER_PROTOCOL_HASH,
+    guardHash: BATCH_MANIFEST.guardHash,
+    codeDeps: BATCH_MANIFEST.codeDeps,
+    reserveShannons: ORDER_RESERVE.toString(),
+    maxExecutionFeeShannons: ORDER_MAX_FEE.toString(),
+    maxPendingPerWallet: 3,
+    markets: [],
+  };
+
   const { sponsoredChain } = await import('./sponsored-browser-fixture.mjs');
   const { SponsoredClient } = await import('../web/src/features/direct/sponsored-client.ts');
   const { attachBatchRpc, batchOwnerKey } = await import('./batch-browser-fixture.mjs');
@@ -84,8 +97,9 @@ async function main() {
       ['chromium', chromium],
       ['webkit', webkit],
     ]) {
+      if (process.argv.includes('--chromium-mobile') && name !== 'chromium') continue;
       browser = await engine.launch({ headless: true });
-      for (const width of [390, 1440]) {
+      for (const width of process.argv.includes('--chromium-mobile') ? [390] : [390, 1440]) {
         phase = `${name} ${width} setup`;
         const chain = await batchChain(Date.now() + 7200000),
           context = await browser.newContext({
@@ -158,7 +172,10 @@ async function main() {
             return route.abort();
           }
           if (url.pathname === '/api/me') return json({ user: account });
-          if (url.pathname === '/api/direct/config') return json(MANIFEST);
+          if (url.pathname === '/api/direct/config')
+            return json({ ...MANIFEST, orderDeployment: true });
+          if (url.pathname === '/api/direct/orders/configuration') return json(orderConfig);
+          if (url.pathname === '/api/direct/orders/wallet') return json({ orders: [] });
           if (url.pathname === '/api/direct/batch/config') return json(BATCH_MANIFEST);
           if (url.pathname === '/api/direct/batch/demand') {
             if (holdDemand) {
@@ -537,6 +554,22 @@ async function main() {
         );
         assert.equal(remaining[0].lineId, seed.picks[1].lineId);
         assert.equal(remaining[0].amountCkb, '175');
+        await page.evaluate(async () => (await import('/batch.js')).clearDraft());
+        await tracker.getByText('Confirmed', { exact: true }).waitFor();
+        assert.equal(
+          await page.locator('.payment-progress:not([hidden])').count(),
+          1,
+          'one tracker survives empty draft and version switch',
+        );
+        await page
+          .getByRole('button', { name: 'Open prediction slip', exact: true })
+          .first()
+          .click();
+        const confirmation = page.getByRole('status').filter({ hasText: 'Payment confirmed.' });
+        await confirmation.waitFor();
+        await page.getByRole('button', { name: 'Dismiss payment confirmation' }).click();
+        await confirmation.waitFor({ state: 'hidden' });
+
         assert.deepEqual(external, []);
         assert.deepEqual(errors, []);
         results.push({
