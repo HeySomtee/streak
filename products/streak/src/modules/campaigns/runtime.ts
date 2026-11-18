@@ -58,6 +58,17 @@ export async function queuedCampaignFixtureIds(): Promise<string[]> {
   ];
 }
 
+export async function legacyCampaignFixtureIds(): Promise<string[]> {
+  const hash = orderConfig().protocolHash;
+  return [
+    ...new Set(
+      (await campaignMarketCommitments())
+        .filter((row) => row.marketKey !== campaignMarketPin(row.fixtureId, hash))
+        .map((row) => row.fixtureId),
+    ),
+  ];
+}
+
 export function campaignEntryPayments() {
   campaignService();
   if (!storage) throw new CampaignError('Competition payment storage is unavailable.', 503);

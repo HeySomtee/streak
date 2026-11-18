@@ -1,3 +1,4 @@
+import { genesisReservedInputs } from './genesis-plans';
 import * as ccc from '@ckb-ccc/core';
 import { createHash } from 'node:crypto';
 import {
@@ -31,6 +32,7 @@ import { admissionDrain } from './admission-drain';
 import { orderReservedInputs } from './order-reservations';
 import { readBatch } from './read-batch';
 import { queuedFixtureIds } from './queued-fixtures';
+import type { OrderMarkets } from './order-markets';
 
 const pointKey = (p: ccc.OutPointLike) => ccc.OutPoint.from(p).toHex();
 const point = (p: ccc.OutPoint): OrderPoint => ({ txHash: p.txHash, index: Number(p.index) });
@@ -64,6 +66,7 @@ export interface OrderOptions {
   registry: DirectRegistry;
   config: DirectProtocolConfig;
   now?: () => number;
+  marketPreparation?: OrderMarkets;
   /** Fresh provider validation, including the selected immutable catalogue terms. */
   validateFixture: (fixtureId: string) => Promise<void>;
   /** Canonical execution projection; delivery is retried until acknowledged. */
@@ -84,6 +87,8 @@ export class OrderService {
     return {
       ...this.options.config,
       enabled: this.options.config.codeDeps.length === 2,
+      onDemandMarkets: !!this.options.marketPreparation,
+      legacyFixtureIds: this.options.marketPreparation?.legacyFixtureIds() ?? [],
       reserveShannons: ORDER_RESERVE.toString(),
       maxExecutionFeeShannons: ORDER_MAX_FEE.toString(),
       maxPendingPerWallet: 3,
@@ -129,7 +134,7 @@ export class OrderService {
   }
   async wallet(ownerAddress: string) {
     const owner = (await ccc.Address.fromString(ownerAddress, this.options.client)).script;
-    const reserved = new Set<string>();
+    const reserved = genesisReservedInputs(this.options.journal.directory, this.now());
     const orders: OrderStatus[] = [];
     const candidates: OrderCell[] = [];
     // Do not hydrate every historical execution and signature for a history read.
@@ -282,6 +287,8 @@ export class OrderService {
       );
       const legacy = atomicReservations(this.options.journal, this.now(), new Set());
       for (const input of legacy.pending(legacy.allowed).inputs) reserved.add(input);
+      for (const input of genesisReservedInputs(this.options.journal.directory, this.now()))
+        reserved.add(input);
       if (request.userInputs.some((p) => reserved.has(pointKey(p))))
         throw Error(
           'These funds already belong to another payment. Use the available wallet change.',
@@ -289,7 +296,9 @@ export class OrderService {
       const markets = [];
       await readBatch(request.picks, (pick) => this.options.validateFixture(pick.fixtureId));
       for (const pick of request.picks) {
-        const market = this.options.registry.get(pick.fixtureId);
+        const market =
+          this.options.marketPreparation?.get(pick.fixtureId) ??
+          this.options.registry.get(pick.fixtureId);
         if (
           !market ||
           market.termsHash !== pick.termsHash ||
@@ -425,9 +434,12 @@ export class OrderService {
         this.now(),
         row.offer.rawHash,
       );
+      for (const input of genesisReservedInputs(this.options.journal.directory, this.now()))
+        historical.add(input);
       if (row.offer.inputs.some((c) => historical.has(pointKey(c.outPoint))))
         throw Error('Another accepted payment reserves this funding');
       await verifyOrderSignature(this.options.client, row.offer, bytes);
+      this.options.marketPreparation?.assertAcceptable(row.offer.markets);
       row.signedBytes = bytes;
       row.acceptedAt = this.now();
       row.state = 'accepted';
@@ -801,6 +813,12 @@ export class OrderService {
             ).inputs,
         );
         const expired = this.now() >= decodeOrder(row.offer.orderData).expiry;
+        if (
+          !expired &&
+          this.options.marketPreparation &&
+          !(await this.options.marketPreparation.ensure(row.offer.markets))
+        )
+          continue;
         const tx = expired
           ? this.refund(row)
           : admissionDrain(this.options.journal.directory, this.now())

@@ -1,3 +1,4 @@
+import { genesisReservedInputs } from './genesis-plans';
 import { queuedFixtureIds } from './queued-fixtures';
 import * as ccc from '@ckb-ccc/core';
 import { createHash, randomUUID } from 'node:crypto';
@@ -478,12 +479,18 @@ export class BatchService extends SponsorService {
           64,
         );
         if (page.cells.length > 64) throw Error('Sponsor funding page exceeded its bound');
+        const genesisInputs = genesisReservedInputs(this.options.journal.directory, this.now());
         const candidates = [
-          ...origins.slice(-1).filter((origin) => !allocation.unavailable(origin)),
+          ...origins
+            .slice(-1)
+            .filter(
+              (origin) => !allocation.unavailable(origin) && !genesisInputs.has(origin.toHex()),
+            ),
           ...page.cells
             .filter(
               (cell) =>
                 !allocation.unavailable(cell.outPoint) &&
+                !genesisInputs.has(cell.outPoint.toHex()) &&
                 !cell.cellOutput.type &&
                 cell.outputData === '0x' &&
                 cell.cellOutput.capacity >= reserve + minChange(sponsor),
@@ -497,6 +504,7 @@ export class BatchService extends SponsorService {
           const live = await this.options.client.getCellLiveNoCache(candidate, true, true);
           if (
             live &&
+            !genesisInputs.has(live.outPoint.toHex()) &&
             !live.cellOutput.type &&
             live.outputData === '0x' &&
             live.cellOutput.lock.eq(sponsor) &&

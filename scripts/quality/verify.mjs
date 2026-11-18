@@ -202,6 +202,11 @@ async function browserChecks() {
     isolated: true,
   });
   run(
+    'New regular market sign-once checkout',
+    [join(product, 'scripts/order-browser.cjs'), '--demand'],
+    { cwd: product, isolated: true },
+  );
+  run(
     'Sponsored first prediction browser regression',
     [join(product, 'scripts/sponsored-browser.cjs')],
     { cwd: product, isolated: true },
@@ -277,6 +282,11 @@ try {
           isolated: true,
         });
       }
+      run(
+        'New-market signed orders and abandoned setup recovery',
+        [join(product, 'scripts/order-demand-check.cjs')],
+        { cwd: product, isolated: true },
+      );
       // Real child startup deadlines must not compete with the concurrent client suites.
       const processTest = join(product, 'src/direct-host.test.cjs');
       run('Direct host process lifecycle regression', ['--test', processTest], {
@@ -399,6 +409,11 @@ try {
       run(
         'Sign-once queued payments signed devnet acceptance',
         [join(product, 'scripts/batch-devnet-run.cjs'), '--orders-only'],
+        { timeout: 600_000 },
+      );
+      run(
+        'New-market concurrent orders native acceptance',
+        [join(product, 'scripts/batch-devnet-run.cjs'), '--demand-only'],
         { timeout: 600_000 },
       );
       run(

@@ -18,6 +18,8 @@ require(path.join(root, 'node_modules/ts-node')).register({
   },
 });
 const { OrderService } = require('../src/modules/direct/order-service.ts');
+const { OrderMarkets } = require('../src/modules/direct/order-markets.ts');
+const demand = process.argv.includes('--demand');
 const {
   DirectRegistry,
   V5_DIRECT_CONFIG,
@@ -38,7 +40,7 @@ async function main() {
     `
  import React,{useState} from 'react';import {createRoot} from 'react-dom/client';
  import {QueryClient,QueryClientProvider} from ${source('../node_modules/@tanstack/react-query/build/modern/index.js')};
- import {OrderCheckout} from ${source('../web/src/features/direct/order-ui.tsx')};
+ import {OrderCheckout,PaymentCheckout} from ${source('../web/src/features/direct/order-ui.tsx')};
  import {DraftStore} from ${source('../web/src/features/predictions/draft.ts')};
  import {configureOrderManifest} from ${source('../web/src/features/direct/protocol.ts')};
  import {connect} from ${source('checkout-browser-wallet.mjs')};
@@ -48,8 +50,8 @@ async function main() {
  const qc=new QueryClient({defaultOptions:{queries:{retry:false}}});
  function App(){const [busy,setBusy]=useState(false),[target,setTarget]=useState(null);
  return <main style={{maxWidth:600,margin:'auto',padding:20}}><h1>Queued predictions</h1>
- <button className="quiet" disabled={busy} onClick={()=>store.select('market-test',fixture.config.markets[0].fixtureId,'home')}>Add next pick</button>
- <OrderCheckout store={store} account={{id:'order-browser-user',username:'Test manager',walletAddress:fixture.address}} accountReady={true} onSignIn={()=>{}} signInPending={false} active={true} onBusy={setBusy} activityTarget={target} config={fixture.config}/>
+ <button className="quiet" disabled={busy} onClick={()=>store.select('market-test',fixture.fixtureId,'home')}>Add next pick</button>
+ <${demand ? 'PaymentCheckout' : 'OrderCheckout'} store={store} account={{id:'order-browser-user',username:'Test manager',walletAddress:fixture.address}} accountReady={true} onSignIn={()=>{}} signInPending={false} active={true} onBusy={setBusy} activityTarget={target} config={fixture.config}/>
  <section aria-label="Saved payments" ref={setTarget}/></main>}
  createRoot(document.getElementById('root')).render(<QueryClientProvider client={qc}><App/></QueryClientProvider>);
  `,
@@ -94,9 +96,9 @@ async function main() {
     for (const [name, engine] of [
       ['chromium', chromium],
       ['webkit', webkit],
-    ]) {
+    ].filter(([name]) => !demand || name === 'chromium')) {
       browser = await engine.launch();
-      for (const width of [390, 1440]) {
+      for (const width of demand ? [390] : [390, 1440]) {
         const chain = await batchChain(Date.now() + 7200000, [], new Wallet(batchOwnerKey).address);
         const client = attachBatchRpc(
           new ccc.ClientPublicTestnet({ url: base, fallbacks: [] }),
@@ -133,31 +135,67 @@ async function main() {
           args = Buffer.alloc(172);
         args.writeBigUInt64LE(BigInt(fixture.cutoffMs), 68);
         Buffer.from(config.guardHash.slice(2), 'hex').copy(args, 76);
-        registry.add(
-          createRecord(
-            {
-              id: fixture.fixtureId,
-              sport: 'football',
-              kickoff: new Date(fixture.cutoffMs).toISOString(),
-              home: { name: 'Arsenal' },
-              away: { name: 'Chelsea' },
-              oracle: {
-                provider: 'api-football',
-                fixtureId: fixture.terms.providerFixtureId,
-                source: 'https://v3.football.api-sports.io',
+        if (!demand)
+          registry.add(
+            createRecord(
+              {
+                id: fixture.fixtureId,
+                sport: 'football',
+                kickoff: new Date(fixture.cutoffMs).toISOString(),
+                home: { name: 'Arsenal' },
+                away: { name: 'Chelsea' },
+                oracle: {
+                  provider: 'api-football',
+                  fixtureId: fixture.terms.providerFixtureId,
+                  source: 'https://v3.football.api-sports.io',
+                },
               },
-            },
-            { codeHash: config.protocolHash, hashType: 'data2', args: ccc.hexFrom(args) },
-            code.hash(),
-            config,
+              { codeHash: config.protocolHash, hashType: 'data2', args: ccc.hexFrom(args) },
+              code.hash(),
+              config,
+            ),
+          );
+        client.findCellsPagedNoCache = async (search) => ({
+          cells: [...chain.live.values()].filter((c) =>
+            search.scriptType === 'type'
+              ? c.cellOutput.type?.eq(search.script)
+              : c.cellOutput.lock.eq(search.script),
           ),
-        );
+          lastCursor: '0x',
+        });
+        const marketPreparation = demand
+          ? new OrderMarkets({
+              client,
+              journal,
+              registry,
+              config,
+              earlier: [],
+              signer: new ccc.SignerCkbPrivateKey(client, '0x' + '22'.repeat(32)),
+              fixtures: async (ids) =>
+                ids.map((id) => ({
+                  id,
+                  sport: 'football',
+                  date: new Date(fixture.cutoffMs).toISOString().slice(0, 10),
+                  kickoff: new Date(fixture.cutoffMs).toISOString(),
+                  status: 'scheduled',
+                  stage: 'Synthetic',
+                  home: { id: '1', name: 'Arsenal', code: 'ARS', flag: '' },
+                  away: { id: '2', name: 'Chelsea', code: 'CHE', flag: '' },
+                  oracle: {
+                    provider: 'api-football',
+                    fixtureId: id.slice(13),
+                    source: 'https://v3.football.api-sports.io',
+                  },
+                })),
+            })
+          : undefined;
         let service = new OrderService({
             client,
             journal,
             registry,
             config,
             validateFixture: async () => {},
+            marketPreparation,
           }),
           signatures = 0,
           loseResponse = false;
@@ -172,7 +210,7 @@ async function main() {
           (value) => {
             window.fixture = value;
           },
-          { config: service.configuration(), address: chain.address },
+          { config: service.configuration(), address: chain.address, fixtureId: fixture.fixtureId },
         );
         await context.exposeBinding('checkoutRpc', (_s, method, params) =>
           chain.rpc(method, params),
@@ -191,6 +229,17 @@ async function main() {
           let value;
           try {
             switch (url.pathname) {
+              case '/api/direct/config':
+                value = { orderDeployment: true };
+                break;
+              case '/api/direct/orders/configuration':
+                value = service.configuration();
+                break;
+              case '/api/direct/orders/prepare-markets':
+                value = {
+                  markets: await marketPreparation.prepare(body.fixtureIds, chain.address),
+                };
+                break;
               case '/api/direct/orders/wallet':
                 value = await service.wallet(chain.address);
                 break;
@@ -248,7 +297,7 @@ async function main() {
             .waitFor();
           if (i === 0) {
             const wallet = await service.wallet(chain.address),
-              market = registry.all()[0];
+              market = marketPreparation?.get(fixture.fixtureId) ?? registry.all()[0];
             const free = [...chain.live.values()].filter(
               (c) =>
                 c.cellOutput.lock.eq(owner) &&
@@ -318,7 +367,7 @@ async function main() {
           `${name} ${width}: three signatures, lost acceptance response, new picks, limit, browser close and operator reload passed`,
         );
         await context.close();
-        if (name === 'chromium' && width === 390) {
+        if (!demand && name === 'chromium' && width === 390) {
           await require('./order-scheduling-fixture.cjs')(service);
           await require('./order-recovery-fixture.cjs')(service, owner);
         }

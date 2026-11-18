@@ -57,9 +57,21 @@ export function PaymentCheckout(props: Props) {
   const opening = queued?.plannedFixtureIds?.some(missing);
   const reserved = queued?.reservedFixtureIds?.some(missing);
   const ready = !config.isPending && !config.isError;
+  const earlier = snapshot.draft.picks.filter((p) =>
+    queued?.legacyFixtureIds?.includes(p.matchId),
+  ).length;
   const orderOnly =
-    ready && !!queued && (!snapshot.draft.picks.length || matching === snapshot.draft.picks.length);
-  const legacyEnabled = ready && !orderOnly && !opening && !reserved && !matching;
+    ready &&
+    !!queued &&
+    (queued.onDemandMarkets
+      ? earlier === 0
+      : !snapshot.draft.picks.length || matching === snapshot.draft.picks.length);
+  const legacyEnabled =
+    ready &&
+    !orderOnly &&
+    (queued?.onDemandMarkets
+      ? earlier === snapshot.draft.picks.length
+      : !opening && !reserved && !matching);
   return (
     <>
       {queued && (
@@ -102,7 +114,7 @@ export function PaymentCheckout(props: Props) {
             Check market setup
           </button>
         </Notice>
-      ) : !orderOnly && matching ? (
+      ) : !orderOnly && (matching || (queued?.onDemandMarkets && !legacyEnabled)) ? (
         <Notice title="Keep these payment versions in separate slips" tone="attention">
           Some picks use an earlier market. Pay those in a separate slip; each payment keeps its
           original settlement rules.
@@ -226,21 +238,22 @@ export function OrderCheckout(props: Props & { config: OrderConfig; checkoutEnab
   const progressCreatedAt = progressOrder?.offer.createdAt ?? 0;
   const hasPending = pending.length > 0;
   const presentationToken = `${identity}:${progressKey}:${progressOrder?.state}`;
+  const { onProgress } = props;
   useEffect(() => {
-    props.onProgress?.(
+    onProgress?.(
       progressKey && dismissedProgress !== presentationToken
         ? { key: progressKey, pending: hasPending, createdAt: progressCreatedAt }
         : null,
     );
   }, [
-    props.onProgress,
+    onProgress,
     progressKey,
     hasPending,
     progressCreatedAt,
     dismissedProgress,
     presentationToken,
   ]);
-  useEffect(() => () => props.onProgress?.(null), [props.onProgress]);
+  useEffect(() => () => onProgress?.(null), [onProgress]);
   const unsent = (local.data ?? []).filter(
     (r) =>
       r.status !== 'discarded' &&

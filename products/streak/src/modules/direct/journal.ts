@@ -120,7 +120,13 @@ export class OperatorJournal {
     const transactionHash = hash32(row.transactionHash, 'journal transaction hash');
     const tx = ccc.Transaction.fromBytes(row.signedTransaction);
     const creations =
-      row.action === 'batch' ? this.parseCreations(row.creations, transactionHash) : undefined;
+      row.action === 'batch' || (row.action === 'create' && row.creations !== undefined)
+        ? this.parseCreations(
+            row.creations,
+            transactionHash,
+            row.action === 'create' ? 'v5-' : 'v4-',
+          )
+        : undefined;
     if (
       tx.hash() !== transactionHash ||
       tx.inputs.length > 64 ||
@@ -172,7 +178,15 @@ export class OperatorJournal {
       transactionHash: signed.hash(),
       signedTransaction: ccc.hexFrom(signed.toBytes()),
       descriptor,
-      ...(action === 'batch' ? { creations: this.parseCreations(creations, signed.hash()) } : {}),
+      ...(action === 'batch' || (action === 'create' && creations !== undefined)
+        ? {
+            creations: this.parseCreations(
+              creations,
+              signed.hash(),
+              action === 'create' ? 'v5-' : 'v4-',
+            ),
+          }
+        : {}),
     };
     // Validate before exposing a signed transaction on disk or the network.
     validateRecord(descriptor, this.config);
@@ -186,7 +200,11 @@ export class OperatorJournal {
     writeExclusiveJson(this.path(operationId), operation);
     return this.load(operationId)!;
   }
-  private parseCreations(value: unknown, transactionHash: string): DirectMarketRecord[] {
+  private parseCreations(
+    value: unknown,
+    transactionHash: string,
+    generation: 'v4-' | 'v5-',
+  ): DirectMarketRecord[] {
     if (!Array.isArray(value) || value.length > 8)
       throw Error('Invalid atomic creation descriptors');
     const records = value.map((record) => validateRecord(record, this.config));
@@ -195,7 +213,7 @@ export class OperatorJournal {
       records.some(
         (record) =>
           record.creationTxHash !== transactionHash ||
-          directGeneration(record.type.codeHash) !== 'v4-',
+          directGeneration(record.type.codeHash) !== generation,
       )
     )
       throw Error('Atomic creation identities differ');
@@ -353,7 +371,10 @@ export async function broadcastOperation(
   const state = await reconcileOperation(client, persisted);
   journal.record(operation.operationId, state);
   if (state.status !== 'ready-to-rebroadcast') return state;
-  if (operation.action === 'create' && now >= operation.descriptor.cutoffMs)
+  if (
+    operation.action === 'create' &&
+    (operation.creations ?? [operation.descriptor]).some((r) => now >= r.cutoffMs)
+  )
     throw Error('Do not broadcast a new market after its pinned kickoff');
   if (
     operation.action === 'report' &&

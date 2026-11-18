@@ -27,7 +27,7 @@ import { survivorService, tickSurvivor } from './modules/survivor/runtime';
 import { SurvivorError } from './modules/survivor/domain';
 import { fiveService, startFiveProgression } from './modules/five/runtime';
 import { FiveError } from './modules/five/domain';
-import { campaignService, campaignEntryPayments, campaignPaymentsEnabled, reconcileCampaigns, startCampaigns, queuedCampaignFixtureIds, invalidateCampaignMarketCommitments } from './modules/campaigns/runtime';
+import { campaignService, campaignEntryPayments, campaignPaymentsEnabled, reconcileCampaigns, startCampaigns, queuedCampaignFixtureIds, legacyCampaignFixtureIds, invalidateCampaignMarketCommitments } from './modules/campaigns/runtime';
 import { entryPaymentOffer, orderEntryOffer, regularOnlySelection } from './modules/campaigns/entry-payments';
 import { CampaignError, identifier as campaignId, object as campaignObject } from './modules/campaigns/domain';
 import { campaignEvidenceExport, campaignEvidenceCsv } from './modules/campaigns/evidence';
@@ -1516,12 +1516,13 @@ async function handleSponsor(req:IncomingMessage,res:ServerResponse,url:URL,acti
 async function handleOrders(
   req: IncomingMessage,
   res: ServerResponse,
-  action: 'configuration' | 'wallet' | 'offer' | 'submit' | 'status' | 'cancel-review',
+  action: 'configuration' | 'wallet' | 'offer' | 'submit' | 'status' | 'cancel-review' | 'prepare-markets',
 ): Promise<void> {
   if (action === 'configuration') {
     try {
       const result = campaignObject(await sponsorProxy('/orders/configuration'));
-      return sendJson(res, 200, { ...result, plannedFixtureIds: result.enabled ? await queuedCampaignFixtureIds() : [] });
+      return sendJson(res, 200, { ...result, plannedFixtureIds: result.enabled ? await queuedCampaignFixtureIds() : [],
+        legacyFixtureIds: [...new Set([...(Array.isArray(result.legacyFixtureIds) ? result.legacyFixtureIds : []), ...(result.enabled ? await legacyCampaignFixtureIds() : [])])] });
     } catch {
       return sendJson(res, 503, { error: 'Payment options could not refresh. Your picks are saved; please retry.' });
     }
@@ -1546,6 +1547,13 @@ async function handleOrders(
   )
     return sendJson(res, 400, { error: 'Invalid payment request.' });
   try {
+    if (action === 'prepare-markets') {
+      if (!Array.isArray(body.fixtureIds) || body.fixtureIds.length < 1 || body.fixtureIds.length > 8 || body.fixtureIds.some((id: unknown) => typeof id !== 'string' || !/^api-football-[1-9][0-9]{0,14}$/.test(id)))
+        return sendJson(res, 400, {error:'Choose one to eight valid fixtures.'});
+      const legacy = new Set(await legacyCampaignFixtureIds());
+      if (body.fixtureIds.some((id: string) => legacy.has(id))) return sendJson(res, 409, {error:'This fixture retains its earlier competition payment rules.'});
+      return sendJson(res, 200, await sponsorProxy('/orders/prepare-markets', {fixtureIds:body.fixtureIds}, address));
+    }
     const payments = campaignPaymentsEnabled() ? campaignEntryPayments() : undefined;
     const actor = { id: user.id, name: user.username || 'Player', wallet: address, ownerHash: (await activityOwner(address)).ownerHash,
     };
@@ -1700,6 +1708,7 @@ const staticRoutes: Record<string, Handler> = {
   "POST /api/direct/batch/offer": (req,res,url)=>handleSponsor(req,res,url,'offer',true),
   'GET /api/direct/orders/configuration': (req, res) => handleOrders(req, res, 'configuration'),
   'POST /api/direct/orders/wallet': (req, res) => handleOrders(req, res, 'wallet'),
+  'POST /api/direct/orders/prepare-markets': (req, res) => handleOrders(req, res, 'prepare-markets'),
   'POST /api/direct/orders/offer': (req, res) => handleOrders(req, res, 'offer'),
   'POST /api/direct/orders/submit': (req, res) => handleOrders(req, res, 'submit'),
   'POST /api/direct/orders/status': (req, res) => handleOrders(req, res, 'status'),

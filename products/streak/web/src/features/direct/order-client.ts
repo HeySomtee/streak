@@ -63,7 +63,7 @@ export async function getOrderConfig(signal?: AbortSignal): Promise<OrderConfig 
     )
       throw Error('Invalid queued-payment deployment.');
   }
-  for (const ids of [value.plannedFixtureIds, value.reservedFixtureIds])
+  for (const ids of [value.plannedFixtureIds, value.reservedFixtureIds, value.legacyFixtureIds])
     if (
       ids !== undefined &&
       (!Array.isArray(ids) ||
@@ -71,6 +71,8 @@ export async function getOrderConfig(signal?: AbortSignal): Promise<OrderConfig 
         ids.some((id) => typeof id !== 'string' || !/^api-football-[1-9][0-9]{0,14}$/.test(id)))
     )
       throw Error('Queued-market setup could not be verified.');
+  if (value.onDemandMarkets !== undefined && typeof value.onDemandMarkets !== 'boolean')
+    throw Error('Invalid market preparation configuration.');
   configureOrderManifest(value);
   return value as unknown as OrderConfig;
 }
@@ -177,14 +179,11 @@ export class OrderClient {
         c.cellOutput.lock.eq(owner),
     );
     const lines = picks.map((p) => {
-      const market = this.config.markets.find((m) => m.fixtureId === p.matchId),
-        amount = amountShannons(p.amountCkb);
-      if (!market) throw Error('This slip includes a market using the earlier payment flow.');
+      const amount = amountShannons(p.amountCkb);
       if (amount === null || amount < 10_000_000_000n)
         throw Error('Enter at least 100 tCKB for each prediction.');
       return {
         fixtureId: p.matchId,
-        termsHash: market.termsHash,
         outcome: ({ home: 0, draw: 1, away: 2 } as const)[p.outcome],
         principalShannons: amount.toString(),
       };
@@ -225,6 +224,24 @@ export class OrderClient {
       accountId,
       lines: picks.map((p) => ({ fixtureId: p.matchId, campaignIds: p.competition?.ids ?? [] })),
     };
+    let markets = this.config.markets;
+    if (
+      this.config.onDemandMarkets &&
+      picks.some((p) => !markets.some((m) => m.fixtureId === p.matchId))
+    ) {
+      const prepared = object(
+        await request(
+          '/direct/orders/prepare-markets',
+          undefined,
+          { fixtureIds: picks.map((p) => p.matchId) },
+          60_000,
+        ),
+      );
+      if (!Array.isArray(prepared.markets) || prepared.markets.length !== picks.length)
+        throw Error('Market preparation could not be verified. Your picks are saved.');
+      // Full immutable descriptor and order binding are validated below, before signing.
+      markets = prepared.markets as OrderConfig['markets'];
+    }
     const body: OrderRequest = {
       requestId: crypto.randomUUID(),
       ownerAddress: await this.signer.getRecommendedAddress(),
@@ -232,7 +249,11 @@ export class OrderClient {
         txHash: c.outPoint.txHash,
         index: Number(c.outPoint.index),
       })),
-      picks: lines,
+      picks: lines.map((line) => {
+        const market = markets.find((m) => m.fixtureId === line.fixtureId);
+        if (!market) throw Error('This slip includes a market using the earlier payment flow.');
+        return { ...line, termsHash: market.termsHash };
+      }),
       competitionSelection: selection,
     };
     const offer = validateOrderOffer(
@@ -264,7 +285,7 @@ export class OrderClient {
     offer.markets.forEach((m, i) => {
       if (
         m.fixtureId !== lines[i].fixtureId ||
-        m.termsHash !== lines[i].termsHash ||
+        m.termsHash !== body.picks[i].termsHash ||
         data.lines[i].outcome !== lines[i].outcome ||
         data.lines[i].principalShannons !== lines[i].principalShannons
       )

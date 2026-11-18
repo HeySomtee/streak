@@ -7,9 +7,10 @@ const script = path.join(__dirname, 'batch-devnet.py');
 const flags = process.argv.slice(2);
 if (
   flags.length > 1 ||
-  (flags.length === 1 && !['--concurrency-only', '--orders-only'].includes(flags[0]))
+  (flags.length === 1 &&
+    !['--concurrency-only', '--orders-only', '--demand-only'].includes(flags[0]))
 )
-  throw Error('Usage: batch-devnet-run.cjs [--concurrency-only|--orders-only]');
+  throw Error('Usage: batch-devnet-run.cjs [--concurrency-only|--orders-only|--demand-only]');
 const env = { ...process.env, NODE_ENV: 'test', STREAK_SKIP_ENV_FILE: '1' };
 for (const name of Object.keys(env)) {
   if (

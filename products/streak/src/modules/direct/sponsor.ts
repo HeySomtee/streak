@@ -1,3 +1,4 @@
+import { genesisReservedInputs } from './genesis-plans';
 import { queuedFixtureIds } from './queued-fixtures';
 import * as ccc from '@ckb-ccc/core';
 import { createHash, randomUUID } from 'node:crypto';
@@ -447,9 +448,11 @@ export class SponsorService {
         'desc',
         64,
       );
+      const genesisInputs = genesisReservedInputs(this.options.journal.directory, this.now());
       const candidates = page.cells
         .filter(
           (cell) =>
+            !genesisInputs.has(cell.outPoint.toHex()) &&
             !cell.cellOutput.type &&
             cell.outputData === '0x' &&
             cell.cellOutput.capacity >= RESERVE + minChange(sponsor),
@@ -472,6 +475,7 @@ export class SponsorService {
         const live = await this.options.client.getCellLiveNoCache(origin, true, true);
         if (
           live &&
+          !genesisInputs.has(live.outPoint.toHex()) &&
           !live.cellOutput.type &&
           live.outputData === '0x' &&
           live.cellOutput.lock.eq(sponsor) &&
@@ -485,6 +489,7 @@ export class SponsorService {
         const live = await this.options.client.getCellLiveNoCache(candidate.outPoint, true, true);
         if (
           live &&
+          !genesisInputs.has(live.outPoint.toHex()) &&
           !live.cellOutput.type &&
           live.outputData === '0x' &&
           live.cellOutput.lock.eq(sponsor) &&

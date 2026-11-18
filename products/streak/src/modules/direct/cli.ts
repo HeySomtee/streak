@@ -1,3 +1,4 @@
+import { GenesisPlans, genesisReservedInputs } from './genesis-plans';
 import * as ccc from '@ckb-ccc/core';
 import { queuedFixtureIds } from './queued-fixtures';
 import { orderConfig } from './order-config';
@@ -391,7 +392,8 @@ export async function operatorFundingBarrier(
   return {
     clear: pending.every(
       (operation) =>
-        operation.action === 'batch' && independentAtomic.has(operation.transactionHash),
+        (operation.action === 'batch' && independentAtomic.has(operation.transactionHash)) ||
+        (operation.action === 'create' && operation.protocolHash === V5_DIRECT_CONFIG.protocolHash),
     ),
     pending,
   };
@@ -406,12 +408,16 @@ const freshResolvedSponsors = new WeakMap<
 export function assertFreshOperatorInputs(
   journal: OperatorJournal,
   candidate: ccc.Transaction,
+  exceptGenesisHash?: string,
 ): void {
   const files = readdirSync(journal.directory).filter((file) => OPERATION_FILE.test(file));
   if (files.length > 1536) throw Error('Operator journal exceeds both generation bounds');
   const inputs = new Set(
     candidate.inputs.map((input) => `${input.previousOutput.txHash}:${input.previousOutput.index}`),
   );
+  const planned = genesisReservedInputs(journal.directory, Date.now(), exceptGenesisHash);
+  if (candidate.inputs.some((i) => planned.has(i.previousOutput.toHex())))
+    throw Error('Operator input is reserved for a pending market review');
   const released = freshResolvedSponsors.get(journal);
   assertSponsorInputsAvailable(
     journal.directory,
@@ -543,9 +549,31 @@ export async function runOperator(
     maxConcurrent: 2,
   });
   const task = async () => {
+    const queuedCreations = queued
+      ? readdirSync(journal.directory)
+          .filter((f) => OPERATION_FILE.test(f) && f.startsWith('create-'))
+          .map((f) => journal.load(f.slice(0, -5))!)
+          .filter((o) => o.descriptor.type.codeHash === queuedConfig.protocolHash)
+      : [];
+    const queuedCreation = queuedCreations.find((o) =>
+      (o.creations ?? [o.descriptor]).some((r) => r.fixtureId === fixtureId),
+    );
+    if (
+      queued &&
+      command === 'create' &&
+      !queuedCreation &&
+      new GenesisPlans(journal.directory)
+        .active(Date.now())
+        .some((p) => p.records.some((r) => r.fixtureId === fixtureId))
+    )
+      throw Error(
+        'Market setup is reserved by an active payment review. Preserve its exact pending genesis.',
+      );
     let record =
       options_.record ??
       registry.get(fixtureId) ??
+      queuedCreation?.creations?.find((r) => r.fixtureId === fixtureId) ??
+      queuedCreation?.descriptor ??
       journal.load(operationKey('create', fixtureId))?.descriptor;
     if (record && record.fixtureId !== fixtureId)
       throw Error('Requested operator record has another fixture');
@@ -565,7 +593,8 @@ export async function runOperator(
     if (command === 'reconcile') {
       const states = [];
       for (const action of ['create', 'report', 'close'] as const) {
-        const entry = journal.load(keyFor(action));
+        const entry =
+          journal.load(keyFor(action)) ?? (action === 'create' ? queuedCreation : undefined);
         if (entry)
           states.push({
             operation: entry.operationId,
@@ -619,7 +648,8 @@ export async function runOperator(
     }
     const action: OperatorAction =
       command === 'create' ? 'create' : command === 'report' ? 'report' : 'close';
-    let operation = journal.load(keyFor(action));
+    let operation =
+      journal.load(keyFor(action)) ?? (action === 'create' ? queuedCreation : undefined);
     let freshEvidence: ConfirmedFootballEvidence | undefined;
     if (!operation) {
       if (action === 'create' && record)
@@ -667,6 +697,17 @@ export async function runOperator(
           'Set STREAK_DIRECT_PRIVATE_KEY explicitly for this isolated operator process; no wallet key file is loaded',
         );
       const signer = new ccc.SignerCkbPrivateKey(client, key);
+      const available = (cell: ccc.Cell) => {
+        try {
+          assertFreshOperatorInputs(
+            journal,
+            ccc.Transaction.from({ inputs: [{ previousOutput: cell.outPoint }] }),
+          );
+          return true;
+        } catch {
+          return false;
+        }
+      };
       let tx: ccc.Transaction;
       if (action === 'create') {
         if (
@@ -691,7 +732,7 @@ export async function runOperator(
             ],
             queuedConfig.protocolHash,
           );
-        const prepared = await buildCreate(client, signer, fixture, Date.now(), config);
+        const prepared = await buildCreate(client, signer, fixture, Date.now(), config, available);
         record = prepared.record;
         tx = prepared.tx;
       } else {
@@ -703,7 +744,7 @@ export async function runOperator(
               'First result observation saved. Run report again after at least 30 seconds.',
             );
           freshEvidence = evidence;
-          tx = await buildReport(client, signer, record, evidence, Date.now(), config);
+          tx = await buildReport(client, signer, record, evidence, Date.now(), config, available);
         } else
           tx = await buildClose(
             client,
@@ -712,6 +753,7 @@ export async function runOperator(
             command === 'void' ? 'void' : 'settle',
             Date.now(),
             config,
+            available,
           );
       }
       assertFreshOperatorInputs(journal, tx);

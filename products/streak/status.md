@@ -1,5 +1,11 @@
 # Streak status
 
+18 November regular new-market queue is implemented locally: two wallets can
+sign independent payments before shared v5 genesis confirms. Focused native-chain,
+synthetic recovery and mobile checkout checks pass, with independent review.
+See [implementation and limits](docs/delivery/regular-market-queue-2026-11-18.md).
+Publication, full release verification and hosted wallet acceptance remain separate.
+
 18 November local changes: [competition queue activation and payment receipts](docs/delivery/queue-activation-2026-11-18.md).
 Newly published v5 competition fixtures feed the existing operator. Payment
 confirmation survives clearing the slip; Activity shows placement and kickoff

@@ -1,5 +1,12 @@
 # Architecture and migration
 
+18 November [regular new-market queue](../delivery/regular-market-queue-2026-11-18.md)
+removes the pre-created-market requirement for ordinary v5 picks. Unsigned durable
+genesis leases bind independent owner orders before setup confirms. Accepted
+orders retain exact setup; existing recovery signs creation, publishes canonical
+markets and admits or refunds without further owner approval. Existing generations
+and earlier signed records keep their original rules.
+
 9 November [sign-once queue](../delivery/signed-payment-queue.md) adds a v5 order lock
 for new, pre-created markets. Wallet funding avoids shared market inputs; the existing
 operator later admits the immutable slip or refunds it after expiry. Durable acceptance

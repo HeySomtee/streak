@@ -124,7 +124,12 @@ export async function loadOperatorMarket(
   return result;
 }
 
-async function funding(client: ccc.Client, lock: ccc.Script, minimum: bigint): Promise<ccc.Cell> {
+async function funding(
+  client: ccc.Client,
+  lock: ccc.Script,
+  minimum: bigint,
+  available?: (cell: ccc.Cell) => boolean,
+): Promise<ccc.Cell> {
   const page = await client.findCellsPagedNoCache(
     {
       script: lock,
@@ -139,7 +144,10 @@ async function funding(client: ccc.Client, lock: ccc.Script, minimum: bigint): P
   const candidates = page.cells
     .filter(
       (cell) =>
-        !cell.cellOutput.type && cell.outputData === '0x' && cell.cellOutput.capacity >= minimum,
+        !cell.cellOutput.type &&
+        cell.outputData === '0x' &&
+        cell.cellOutput.capacity >= minimum &&
+        (!available || available(cell)),
     )
     .sort((left, right) => (left.cellOutput.capacity > right.cellOutput.capacity ? -1 : 1));
   for (const candidate of candidates.slice(0, 4)) {
@@ -149,7 +157,8 @@ async function funding(client: ccc.Client, lock: ccc.Script, minimum: bigint): P
       !live.cellOutput.type &&
       live.outputData === '0x' &&
       live.cellOutput.lock.eq(lock) &&
-      live.cellOutput.capacity >= minimum
+      live.cellOutput.capacity >= minimum &&
+      (!available || available(live))
     )
       return live;
   }
@@ -172,7 +181,7 @@ async function fundedTransaction(
   outputs: ccc.CellOutputLike[],
   outputsData: string[],
   config: DirectProtocolConfig,
-  options: { fund?: ccc.Cell; since?: bigint } = {},
+  options: { fund?: ccc.Cell; since?: bigint; available?: (cell: ccc.Cell) => boolean } = {},
 ): Promise<ccc.Transaction> {
   if (config.codeDeps.length !== 2)
     throw Error('The compatible contract deployment is awaiting testnet funding');
@@ -187,6 +196,7 @@ async function fundedTransaction(
       client,
       lock,
       (used > received ? used - received : 0n) + reserveForChangeAndFee,
+      options.available,
     ));
   const change = fund.cellOutput.capacity + received - used;
   if (change < reserveForChangeAndFee)
@@ -200,6 +210,8 @@ async function fundedTransaction(
   const tx = ccc.Transaction.from({
     inputs: allInputs.map((cell, index) => ({
       previousOutput: cell.outPoint,
+      cellOutput: cell.cellOutput,
+      outputData: cell.outputData,
       since: index === 0 ? (options.since ?? 0n) : 0n,
     })),
     outputs: [...outputs, { capacity: change, lock }],
@@ -236,13 +248,14 @@ export async function buildCreate(
   fixture: Match,
   now = Date.now(),
   config: DirectProtocolConfig = PUBLIC_DIRECT_CONFIG,
+  available?: (cell: ccc.Cell) => boolean,
 ): Promise<{ tx: ccc.Transaction; record: DirectMarketRecord }> {
   const cutoff = Date.parse(fixture.kickoff);
   if (!Number.isSafeInteger(cutoff) || cutoff <= now + 120_000 || fixture.status !== 'scheduled')
     throw Error('Create only a scheduled API fixture at least two minutes before kickoff');
   const lock = await signerLock(signer, config);
   const changeAndFee = BigInt(ccc.CellOutput.from({ capacity: 0n, lock }).occupiedSize) * CKB + CKB;
-  const fund = await funding(client, lock, MARKET_RESERVE_SHANNONS + changeAndFee);
+  const fund = await funding(client, lock, MARKET_RESERVE_SHANNONS + changeAndFee, available);
   const args = hex(
     Buffer.concat([
       config.protocolHash === V5_DIRECT_CONFIG.protocolHash
@@ -263,7 +276,7 @@ export async function buildCreate(
     Array.from({ length: 5 }, () => guarded(type, RESERVE, config)),
     ['0x0000ff', ...Array.from({ length: 4 }, (_, index) => hex(Buffer.from([1, index, 0, 0])))],
     config,
-    { fund },
+    { fund, available },
   );
   return {
     tx,
@@ -276,6 +289,72 @@ export async function buildCreate(
   };
 }
 
+/** One operator input creates up to eight independent v5 market groups. */
+export async function buildQueuedCreates(
+  client: ccc.Client,
+  signer: ccc.Signer,
+  fixtures: Match[],
+  fund: ccc.Cell,
+  now: number,
+  config: DirectProtocolConfig,
+): Promise<{ tx: ccc.Transaction; records: DirectMarketRecord[] }> {
+  if (
+    config.protocolHash !== V5_DIRECT_CONFIG.protocolHash ||
+    !fixtures.length ||
+    fixtures.length > 8 ||
+    new Set(fixtures.map((f) => f.id)).size !== fixtures.length
+  )
+    throw Error('Invalid queued market creation batch');
+  const lock = await signerLock(signer, config);
+  if (fund.cellOutput.type || fund.outputData !== '0x' || !fund.cellOutput.lock.eq(lock))
+    throw Error('Invalid queued market funding cell');
+  const types = fixtures.map((fixture, index) => {
+    const cutoff = Date.parse(fixture.kickoff);
+    if (!Number.isSafeInteger(cutoff) || cutoff <= now + 120_000 || fixture.status !== 'scheduled')
+      throw Error('This match is too close to kickoff to start a new payment.');
+    const base = Buffer.alloc(4);
+    base.writeUInt32LE(index * 5);
+    return ccc.Script.from({
+      codeHash: config.protocolHash,
+      hashType: 'data2',
+      args: hex(
+        Buffer.concat([
+          raw(ccc.hashCkb(fund.outPoint.toBytes())),
+          base,
+          raw(lock.hash()),
+          le(BigInt(cutoff)),
+          raw(config.guardHash),
+          raw(lock.hash()),
+          raw(lock.hash()),
+        ]),
+      ),
+    });
+  });
+  const tx = await fundedTransaction(
+    client,
+    signer,
+    [],
+    types.flatMap((type) => Array.from({ length: 5 }, () => guarded(type, RESERVE, config))),
+    types.flatMap(() => [
+      '0x0000ff',
+      ...Array.from({ length: 4 }, (_, i) => hex(Buffer.from([1, i, 0, 0]))),
+    ]),
+    config,
+    { fund },
+  );
+  return {
+    tx,
+    records: fixtures.map((fixture, i) =>
+      createRecord(
+        fixture,
+        { codeHash: types[i].codeHash, hashType: 'data2', args: types[i].args },
+        tx.hash(),
+        config,
+      ),
+    ),
+  };
+}
+
 export async function buildReport(
   client: ccc.Client,
   signer: ccc.Signer,
@@ -283,6 +362,7 @@ export async function buildReport(
   evidence: ConfirmedFootballEvidence,
   now = Date.now(),
   config: DirectProtocolConfig = PUBLIC_DIRECT_CONFIG,
+  available?: (cell: ccc.Cell) => boolean,
 ): Promise<ccc.Transaction> {
   config = protocolConfigFor(descriptor, config);
   validateRecord(descriptor, config);
@@ -314,6 +394,7 @@ export async function buildReport(
     [guarded(ccc.Script.from(descriptor.type), state.market.cell.cellOutput.capacity, config)],
     [hex(Buffer.from([0, 1, evidence.outcome]))],
     config,
+    { available },
   );
 }
 
@@ -392,6 +473,7 @@ export async function buildClose(
   mode: 'settle' | 'void',
   now = Date.now(),
   config: DirectProtocolConfig = PUBLIC_DIRECT_CONFIG,
+  available?: (cell: ccc.Cell) => boolean,
 ): Promise<ccc.Transaction> {
   config = protocolConfigFor(descriptor, config);
   const state = await loadOperatorMarket(client, descriptor, config);
@@ -477,6 +559,7 @@ export async function buildClose(
       ? 0x4000000000000000n | BigInt(Math.ceil(descriptor.terms.deadlineMs / 1000))
       : 0n;
   return fundedTransaction(client, signer, [market, ...state.shards], outputs, data, config, {
+    available,
     since,
   });
 }

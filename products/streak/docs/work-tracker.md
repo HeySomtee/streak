@@ -1,5 +1,32 @@
 # Streak work tracker
 
+18 November publication follow-up: owner requested push after the focused results
+and deferred full gate were disclosed. Publish only the regular-market queue
+change; preserve the unrelated hosted acceptance checklist. No further long
+release suite, hosted CI or Render access in this publication. Focused evidence
+is recorded below; full release verification and physical-wallet acceptance
+remain outstanding.
+
+18 November follow-up implemented locally: regular uncreated fixtures now route
+to v5; unsigned shared setup leases expire, accepted signatures retain immutable
+setup, and server recovery creates/adopts genesis before admission. Two wallets
+on the same new fixture and a three-market batch pass the focused native v5
+node check; actual mobile checkout and synthetic abandonment/refund checks pass.
+Independent review found no remaining concrete blocker after its requested fixes.
+See [regular market queue](delivery/regular-market-queue-2026-11-18.md). Full release
+gate remains owner-deferred, with publication and hosted physical-wallet acceptance
+outstanding. Owner acceptance checklist remains untouched. No Render access.
+
+18 November owner correction: two separate wallets are submitting to the same new,
+uncreated regular market. Published b62633b only activated competition provisioning;
+ordinary checkout still creates v4 and waits before signing. Active work: prepare
+one immutable v5 genesis on demand, accept independent signed owner orders before
+genesis confirmation, and recover creation/admission without the browser. Cover
+multiple new fixtures per slip and bounded operator funding dependencies. Preserve
+older market rules, signed records and the owner acceptance checklist. No Render
+access. Long release tests remain deferred until a working version; focused
+regressions and independent money/recovery review are required.
+
 18 November release direction: the owner requested "push skip tests" for this
 release. Commit and push hooks are skipped for this publication only; no tests
 are rerun. Earlier focused evidence remains recorded, and the full release gate

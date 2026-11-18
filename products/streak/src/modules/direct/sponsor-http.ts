@@ -1,3 +1,4 @@
+import { OrderMarkets } from './order-markets';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { isAbsolute, resolve } from 'node:path';
@@ -150,6 +151,13 @@ export function createSponsorServer(
         }
         if (typeof owner !== 'string' || owner.length > 300)
           throw Error('Authenticated wallet required');
+        if (url.pathname === '/orders/prepare-markets') {
+          if (!orders.options.marketPreparation)
+            throw Error('On-demand market preparation is unavailable');
+          return reply(res, 200, {
+            markets: await orders.options.marketPreparation.prepare(request.fixtureIds, owner),
+          });
+        }
         if (url.pathname === '/orders/wallet') return reply(res, 200, await orders.wallet(owner));
         if (url.pathname === '/orders/offer') {
           if (request.ownerAddress !== owner)
@@ -445,11 +453,35 @@ export async function runSponsorService(): Promise<void> {
     )
       throw Error('Queued markets need a separate absolute registry directory');
     await verifyOrderDeployment(client, queuedConfig);
+    const orderRegistry = new DirectRegistry(orderDirectory, queuedConfig);
+    const earlierRegistries = [
+      service.options.registry,
+      ...(batch ? [batch.options.registry] : []),
+      ...(batch?.options.existingRegistry ?? []).filter(
+        (r) => r.config.protocolHash !== queuedConfig.protocolHash,
+      ),
+    ];
+    orderRegistry.publicationTargets = earlierRegistries;
+    for (const registry of earlierRegistries)
+      registry.publicationTargets = [
+        orderRegistry,
+        ...earlierRegistries.filter((r) => r !== registry),
+      ];
+    const marketPreparation = new OrderMarkets({
+      client,
+      signer: service.options.signer,
+      journal: service.options.journal,
+      config: queuedConfig,
+      registry: orderRegistry,
+      fixtures,
+      earlier: earlierRegistries,
+    });
     orders = new OrderService({
       client,
       journal: service.options.journal,
       config: queuedConfig,
-      registry: new DirectRegistry(orderDirectory, queuedConfig),
+      registry: orderRegistry,
+      marketPreparation,
       validateFixture: async (id) => {
         await fixtures([id]);
       },

@@ -1,5 +1,9 @@
 # Streak documentation
 
+18 November [regular new-market signed queue](delivery/regular-market-queue-2026-11-18.md):
+ordinary picks prepare shared v5 genesis and accept independent wallet signatures
+before creation confirms, with expiring unsigned setup and unattended recovery.
+
 18 November [queue activation and payment receipts](delivery/queue-activation-2026-11-18.md):
 new competition market provisioning, persistent completion and placement timestamps.
 Local verification and outstanding hosted acceptance are listed separately.
