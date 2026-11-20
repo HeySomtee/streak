@@ -26,10 +26,18 @@ were retained and did not authorize publication. At 06:42 UTC both public
 frontend assets matched the verified bytes, and the new backend exposed
 `protectedLegacyFixtureIds`. A brief 502 during rollout recovered. The earlier
 memory incident remains unresolved; this is deployment evidence, not a memory fix.
-No signed-in Render browser is exposed on the available desktop. Requested one
-owner Shell command to apply the 14 explicit rollover IDs. Activation and the
-resulting hosted mixed-slip/old-claim acceptance remain pending; no marker or
-funding was changed by the agent.
+No signed-in Render browser is exposed on the available desktop. The owner ran
+the explicit 14-fixture apply command in Render Shell and received `queued`,
+14 new commitments, 14 markets awaiting registration and `broadcast: false`.
+At 06:47 UTC public configuration confirmed all 14 absent from legacy routing
+and present in both reserved/planned v5 lists. None yet had a v5 registry entry.
+Independent public review at 06:48 UTC also found all 14 original markets still
+visible with `entryEnabled: false` and their original creation transactions.
+Routing activation is complete; worker funding,
+canonical fresh-market registration and hosted mixed-slip/old-claim wallet
+acceptance remain separate checks. Required new market reserves total 42,700
+tCKB plus fees. No signed payment or private funding record was accessed by the
+agent. Preserve the separate memory-reliability task and owner testing checklist.
 
 19 November hosted outage investigation: owner supplied Render 502 screenshot.
 Read-only public probes confirmed HTTP 502 for `/`, `/season/` and `/health`;

@@ -62,9 +62,20 @@ stages passed in one complete run, finished 06:37 UTC on Node 24.14.0. The exact
 Git tree receipt was reused for push. This includes the mixed replacement-market
 browser checkout, native queued-order chain lifecycle, older claims, real
 PostgreSQL and both browser engines. At 06:42 UTC both public frontend bundles
-matched the verified build and the new backend configuration was present. The
-14-fixture activation remains pending the explicit Render Shell command; no
-live routing or funding change is claimed. The earlier attempts below are history.
+matched the verified build and the new backend configuration was present.
+
+The owner then ran the explicit hosted apply command for all 14 IDs above. Its
+response was `queued`, with 14 new commitments, 14 awaiting market registration
+and `broadcast: false`. At 06:47 UTC public configuration independently showed
+all 14 absent from `legacyFixtureIds` and present in `reservedFixtureIds` and
+`plannedFixtureIds`. No target yet appeared in the registered v5 market list.
+Independent public review at 06:48 UTC found all 14 original markets still in
+`/api/direct/markets`, with original creation transactions and
+`entryEnabled: false`. This verifies new-entry routing
+activation and retained original-market visibility, not completed fresh-pool
+deployment or a hosted claim. The worker still has to register the fresh pools;
+physical-wallet mixed-slip and earlier-claim acceptance remain outstanding.
+The earlier attempts below are historical local evidence.
 
 Focused isolated tests cover rollover commitments, both publication race orders,
 rejected earlier unsigned reviews, retained accepted-signature recovery, fresh
