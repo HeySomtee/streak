@@ -2,6 +2,12 @@
 
 ## 19 November: queued-payment JoyID preflight
 
+20 November update: published in [ed0d46e](https://github.com/HeySomtee/streak/commit/ed0d46eaaf5a4425c6137585766bdd488eba55b6) after all 110 local release
+stages passed at 06:37 UTC. Public frontend bytes and new backend configuration
+were verified live at 06:42 UTC. Physical-wallet acceptance remains separate;
+this release explains the JoyID payment limitation rather than implementing its
+witness format. The earlier verification attempt below is historical.
+
 A tester using JoyID received "Your signed payment may still confirm" when
 reviewing one v5 prediction. Sign-in support does not imply payment support:
 JoyID's passkey lock needs its own reviewed funding-witness implementation.

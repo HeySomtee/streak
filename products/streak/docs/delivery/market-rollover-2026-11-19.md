@@ -57,6 +57,15 @@ Do not delete registry files, signed journals or locks to force this operation.
 
 ## Verification state
 
+20 November release [ed0d46e](https://github.com/HeySomtee/streak/commit/ed0d46eaaf5a4425c6137585766bdd488eba55b6) is published. All 110 required local
+stages passed in one complete run, finished 06:37 UTC on Node 24.14.0. The exact
+Git tree receipt was reused for push. This includes the mixed replacement-market
+browser checkout, native queued-order chain lifecycle, older claims, real
+PostgreSQL and both browser engines. At 06:42 UTC both public frontend bundles
+matched the verified build and the new backend configuration was present. The
+14-fixture activation remains pending the explicit Render Shell command; no
+live routing or funding change is claimed. The earlier attempts below are history.
+
 Focused isolated tests cover rollover commitments, both publication race orders,
 rejected earlier unsigned reviews, retained accepted-signature recovery, fresh
 pool selection and mixed-market checkout. The mobile Chromium journey uses the

@@ -19,8 +19,17 @@ lane through account navigation, then found an outdated checkout re-confirmation
 assertion that expected a floating tracker after dismissal. The actual inline
 receipt and both saved transactions were confirmed. The harness now checks the
 current receipt, canonical persisted status and unchanged signatures/submissions.
-Remaining payment browser and local-chain preflights pass separately. A complete
-rerun is required before publication; failed runs never produce a release receipt.
+The final complete run passed all 110 stages at 06:37 UTC, Node 24.14.0,
+exact tree `a946a1fc28c9874b4298e11f0a5f753b756278b8`. Release [ed0d46e](https://github.com/HeySomtee/streak/commit/ed0d46eaaf5a4425c6137585766bdd488eba55b6)
+is pushed to main; the push reused its successful receipt. Failed earlier runs
+were retained and did not authorize publication. At 06:42 UTC both public
+frontend assets matched the verified bytes, and the new backend exposed
+`protectedLegacyFixtureIds`. A brief 502 during rollout recovered. The earlier
+memory incident remains unresolved; this is deployment evidence, not a memory fix.
+No signed-in Render browser is exposed on the available desktop. Requested one
+owner Shell command to apply the 14 explicit rollover IDs. Activation and the
+resulting hosted mixed-slip/old-claim acceptance remain pending; no marker or
+funding was changed by the agent.
 
 19 November hosted outage investigation: owner supplied Render 502 screenshot.
 Read-only public probes confirmed HTTP 502 for `/`, `/season/` and `/health`;

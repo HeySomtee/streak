@@ -1,5 +1,16 @@
 # Streak status
 
+20 November market-slip compatibility and JoyID preflight are published as [ed0d46e](https://github.com/HeySomtee/streak/commit/ed0d46eaaf5a4425c6137585766bdd488eba55b6).
+All 110 local release stages passed in one complete run at 06:37 UTC on Node
+24.14.0. Commit and push reused the exact-tree receipt. The two browser harness
+corrections retain payment/recovery assertions and add canonical persisted-state
+checks. At 06:42 UTC the public frontend bundles matched the verified build
+byte-for-byte and the new backend configuration responded. The 14-fixture
+rollover still needs its explicit hosted activation command.
+Earlier accepted bets retain their original markets and settlement. JoyID sign-in
+remains supported; JoyID prediction payments are not implemented. The separate
+memory incident and physical-wallet acceptance remain open.
+
 19 November JoyID review correction is implemented locally: the queued checkout
 now detects unsupported payment wallets before review, and unsigned failures no
 longer imply a signed transaction. JoyID sign-in still works; JoyID prediction
