@@ -16,11 +16,20 @@ import { OperatorJournal, operationKey } from './modules/direct/journal';
 import {
   DirectRegistry,
   V4_DIRECT_CONFIG,
+  V5_DIRECT_CONFIG,
   PUBLIC_DIRECT_CONFIG,
   PROVIDER_ORIGIN,
   createRecord,
 } from './modules/direct/registry';
 import { operatorFundingBarrier } from './modules/direct/cli';
+import { OrderService } from './modules/direct/order-service';
+import { OrderMarkets } from './modules/direct/order-markets';
+import { sponsorProxy } from './modules/direct/sponsor-proxy';
+import { commitQueuedFixtures } from './modules/direct/queued-fixtures';
+import {
+  readLegacyCampaignReservations,
+  commitMarketRollovers,
+} from './modules/direct/market-rollover';
 import { ReviewWaitingError } from './modules/direct/review-queue';
 import { loadOperatorMarket } from './modules/direct/operator';
 import type { Match } from './types';
@@ -199,6 +208,81 @@ async function main() {
     now = NOW;
     console.log(
       'PASS full bounded signing window starts after validation, preserves idempotency and accepts delayed approval',
+    );
+
+    const rolloverRegistry = new DirectRegistry(join(directory, 'rollover-v5'), V5_DIRECT_CONFIG);
+    const rolloverService = new BatchService({
+      ...options,
+      journal: new OperatorJournal(join(directory, 'rollover-operator'), config),
+      registry: new DirectRegistry(join(directory, 'rollover-old'), config),
+      existingRegistry: [rolloverRegistry],
+    });
+    const rolloverRequest = { ...request, requestId: randomUUID(), picks: picks.slice(0, 2) };
+    const rolloverOffer = await rolloverService.prepareOffer(rolloverRequest);
+    const unsignedBefore = structuredClone(rolloverService.store.load(rolloverOffer.offerId));
+    commitMarketRollovers(rolloverRegistry.directory!, [picks[0].fixtureId]);
+    await assert.rejects(rolloverService.prepareOffer(rolloverRequest), /now use queued payments/);
+    await assert.rejects(
+      rolloverService.prepareOffer({ ...rolloverRequest, requestId: randomUUID() }),
+      /now use queued payments/,
+    );
+    const rolledSignature = await owner.signOnlyTransaction(
+      ccc.Transaction.fromBytes(rolloverOffer.unsignedBytes),
+    );
+    await assert.rejects(
+      rolloverService.submit(
+        {
+          offerId: rolloverOffer.offerId,
+          rawHash: rolloverOffer.rawHash,
+          userSignedBytes: rolledSignature.toHex(),
+        },
+        true,
+      ),
+      /now use queued payments/,
+    );
+    assert.deepEqual(
+      rolloverService.store.load(rolloverOffer.offerId),
+      unsignedBefore,
+      'rollover leaves the old unsigned record intact and never acknowledges its signature',
+    );
+    const acceptedRegistry = new DirectRegistry(join(directory, 'accepted-v5'), V5_DIRECT_CONFIG);
+    const acceptedService = new BatchService({
+      ...options,
+      journal: new OperatorJournal(join(directory, 'accepted-operator'), config),
+      registry: new DirectRegistry(join(directory, 'accepted-old'), config),
+      existingRegistry: [acceptedRegistry],
+    });
+    const acceptedRequest = { ...request, requestId: randomUUID(), picks: picks.slice(0, 2) };
+    const acceptedOffer = await acceptedService.prepareOffer(acceptedRequest);
+    const acceptedSignature = await owner.signOnlyTransaction(
+      ccc.Transaction.fromBytes(acceptedOffer.unsignedBytes),
+    );
+    const acceptedSubmission = {
+      offerId: acceptedOffer.offerId,
+      rawHash: acceptedOffer.rawHash,
+      userSignedBytes: acceptedSignature.toHex(),
+    };
+    const acceptedReceipt = await acceptedService.submit(acceptedSubmission, true);
+    commitMarketRollovers(acceptedRegistry.directory!, [picks[0].fixtureId]);
+    assert.deepEqual(await acceptedService.prepareOffer(acceptedRequest), acceptedOffer);
+    assert.deepEqual(await acceptedService.submit(acceptedSubmission, true), acceptedReceipt);
+    const rolledRecovery = await acceptedService.status(acceptedSubmission, true);
+    assert(
+      rolledRecovery.signedBytes,
+      'accepted earlier authorization still reaches sponsor signing',
+    );
+    assert.equal(
+      acceptedService.store.load(acceptedOffer.offerId)?.userSignedBytes,
+      acceptedSignature.toHex(),
+    );
+    assert.equal(
+      broadcasts,
+      1,
+      'accepted earlier authorization still attempts exact-byte delivery',
+    );
+    broadcasts = 0;
+    console.log(
+      'PASS explicit rollover blocks fresh and repeated unsigned old offers while accepted recovery retains exact signatures',
     );
 
     const offer = await service.prepareOffer(request),
@@ -672,11 +756,167 @@ async function main() {
     console.log(
       'PASS atomic publication, mixed existing/new entry and stale shard fail before co-signing',
     );
+    const ipcRegistry = new DirectRegistry(join(directory, 'ipc-v5'), V5_DIRECT_CONFIG);
+    const ipcMarkets = new OrderMarkets({
+      ...options,
+      registry: ipcRegistry,
+      config: V5_DIRECT_CONFIG,
+      earlier: [registry],
+      fixtures: async () => [],
+    });
+    const ipcMarketGet = ipcMarkets.get.bind(ipcMarkets);
+    ipcMarkets.get = (id) =>
+      id === 'api-football-99992' ? current.lines[0].descriptor : ipcMarketGet(id);
+    const ipcOrders = new OrderService({
+      ...options,
+      registry: ipcRegistry,
+      config: V5_DIRECT_CONFIG,
+      marketPreparation: ipcMarkets,
+      validateFixture: async () => {},
+    });
     const secret = 'a'.repeat(64),
-      server = createSponsorServer(service, secret, service);
+      server = createSponsorServer(service, secret, service, { orders: ipcOrders });
     await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
     const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     try {
+      assert.equal(
+        (await fetch(`${endpoint}/orders/reserve-legacy-markets`, { method: 'POST' })).status,
+        401,
+      );
+      const priorUrl = process.env.STREAK_SPONSOR_URL;
+      const priorSecret = process.env.STREAK_SPONSOR_IPC_SECRET;
+      process.env.STREAK_SPONSOR_URL = endpoint;
+      process.env.STREAK_SPONSOR_IPC_SECRET = secret;
+      try {
+        const previousPrepare = ipcOrders.prepare.bind(ipcOrders);
+        const previousMarkets = ipcMarkets.prepare.bind(ipcMarkets);
+        const previousSubmit = ipcOrders.submit.bind(ipcOrders);
+        const previousStatus = ipcOrders.status.bind(ipcOrders);
+        let unsignedPreparations = 0;
+        const privateFailure = () => {
+          throw Error('private RPC payload and signing context');
+        };
+        ipcOrders.prepare = async () => {
+          unsignedPreparations++;
+          return privateFailure();
+        };
+        ipcMarkets.prepare = async () => {
+          unsignedPreparations++;
+          return privateFailure();
+        };
+        ipcOrders.submit = async () => privateFailure();
+        ipcOrders.status = () => privateFailure();
+        try {
+          const joyLock = await ccc.Script.fromKnownScript(
+            client,
+            ccc.KnownScript.JoyId,
+            `0x0001${'11'.repeat(20)}`,
+          );
+          const joyAddress = (await ccc.Address.fromScript(joyLock, client)).toString();
+          const savedRows = ipcOrders.store.all().length;
+          for (const path of ['/orders/offer', '/orders/prepare-markets']) {
+            await assert.rejects(
+              sponsorProxy(
+                path,
+                { ownerAddress: joyAddress, fixtureIds: [picks[0].fixtureId] },
+                joyAddress,
+              ),
+              (error: unknown) =>
+                error instanceof Error &&
+                error.message ===
+                  'This wallet cannot place predictions yet. Your picks are saved. Use MetaMask, Zerion or a supported native CKB wallet. No payment was sent.',
+            );
+            assert.equal(
+              unsignedPreparations,
+              0,
+              'unsupported lock rejects before an offer or genesis reservation',
+            );
+          }
+          assert.equal(ipcOrders.store.all().length, savedRows);
+          for (const path of ['/orders/offer', '/orders/prepare-markets']) {
+            await assert.rejects(
+              sponsorProxy(path, { ownerAddress, fixtureIds: [picks[0].fixtureId] }, ownerAddress),
+              (error: unknown) =>
+                error instanceof Error &&
+                /No payment was sent by this review/.test(error.message) &&
+                !/signed payment|private RPC|signing context/.test(error.message),
+            );
+          }
+          assert.equal(
+            unsignedPreparations,
+            2,
+            'supported wallets reach normal review preparation',
+          );
+          for (const path of ['/orders/submit', '/orders/status']) {
+            await assert.rejects(
+              sponsorProxy(path, { offerId: randomUUID(), userSignedBytes: '0x' }, ownerAddress),
+              (error: unknown) =>
+                error instanceof Error &&
+                /signed payment may still confirm/.test(error.message) &&
+                !/No payment was sent|private RPC|signing context/.test(error.message),
+            );
+          }
+        } finally {
+          ipcOrders.prepare = previousPrepare;
+          ipcMarkets.prepare = previousMarkets;
+          ipcOrders.submit = previousSubmit;
+          ipcOrders.status = previousStatus;
+        }
+        console.log(
+          'PASS unsupported JoyID lock rejects before preparation, unsigned failures report no payment, signed recovery retains uncertainty',
+        );
+        assert.deepEqual(
+          await sponsorProxy('/orders/reserve-legacy-markets', {
+            fixtureIds: ['api-football-99990'],
+          }),
+          { reserved: ['api-football-99990'] },
+        );
+        assert.deepEqual(
+          [...readLegacyCampaignReservations(ipcRegistry.directory)],
+          ['api-football-99990'],
+        );
+        commitQueuedFixtures(journal.directory, ['api-football-99991']);
+        commitMarketRollovers(ipcRegistry.directory!, ['api-football-99993']);
+        ipcRegistry.add(
+          createRecord(
+            fixture('api-football-99994'),
+            {
+              ...current.lines[0].descriptor.type,
+              codeHash: V5_DIRECT_CONFIG.protocolHash,
+            },
+            H('c'),
+            V5_DIRECT_CONFIG,
+          ),
+        );
+        for (const id of [
+          'api-football-99991',
+          'api-football-99992',
+          'api-football-99993',
+          'api-football-99994',
+        ])
+          await assert.rejects(
+            sponsorProxy('/orders/reserve-legacy-markets', { fixtureIds: [id] }),
+          );
+        assert.deepEqual(
+          [...readLegacyCampaignReservations(ipcRegistry.directory)],
+          ['api-football-99990'],
+          'queued intents, active genesis, explicit rollovers and funded v5 pools cannot gain earlier campaign pins',
+        );
+        await assert.rejects(
+          sponsorProxy('/orders/reserve-legacy-markets/extra', {
+            fixtureIds: ['api-football-99995'],
+          }),
+          /Invalid sponsor operation/,
+        );
+      } finally {
+        if (priorUrl === undefined) delete process.env.STREAK_SPONSOR_URL;
+        else process.env.STREAK_SPONSOR_URL = priorUrl;
+        if (priorSecret === undefined) delete process.env.STREAK_SPONSOR_IPC_SECRET;
+        else process.env.STREAK_SPONSOR_IPC_SECRET = priorSecret;
+      }
+      console.log(
+        'PASS legacy campaign reservations use authenticated bounded IPC and reject queued market ownership',
+      );
       assert.equal((await fetch(`${endpoint}/health`)).status, 401);
       const configurationBeforeHealth = service.configuration;
       let releaseConfiguration!: () => void;

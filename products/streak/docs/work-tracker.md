@@ -1,5 +1,135 @@
 # Streak work tracker
 
+20 November owner authorized completing verification, publication, deployment and
+fresh-market activation for slip compatibility. Use an isolated release worktree
+to preserve the separately edited hosted acceptance checklist. Recheck current
+fixture eligibility before activation; earlier positions and recovery stay intact.
+The memory incident remains a separate unfinished reliability task. Public reads
+on 20 November confirm the Season shell and queued-payment configuration respond
+with HTTP 200; all 14 target fixtures still appear as legacy. Release verification
+also exposed inherited Git hook environment leaking into temporary repository
+tests. Test processes now isolate their Git context, with a real linked-worktree
+hook regression. The main branch and original source files were verified intact;
+fixture-altered Git settings and the disposable index were restored.
+The subsequent full run passed static, application, PostgreSQL and earlier browser
+lanes, then caught a WebKit test reload race during competition invalidations.
+The harness now waits for a fresh bounded quiet interval across mutations and
+reads; fatal browser assertions remain. The next complete run passed every browser
+lane through account navigation, then found an outdated checkout re-confirmation
+assertion that expected a floating tracker after dismissal. The actual inline
+receipt and both saved transactions were confirmed. The harness now checks the
+current receipt, canonical persisted status and unchanged signatures/submissions.
+Remaining payment browser and local-chain preflights pass separately. A complete
+rerun is required before publication; failed runs never produce a release receipt.
+
+19 November hosted outage investigation: owner supplied Render 502 screenshot.
+Read-only public probes confirmed HTTP 502 for `/`, `/season/` and `/health`;
+Render's public status page reported operational services. Both browser-control
+runtimes fail locally with a missing kernel-assets path, so the dashboard/logs
+could not be inspected. Requested the latest Render startup/failure log lines.
+The owner then supplied an Events screenshot confirming memory exhaustion above
+512 MB at displayed 9:31 pm, followed by repeated exit-status-1 restarts through
+9:34 pm on instance b8cht. Owner then supplied logs with approximately 450-460 MiB current usage, peaks above
+512 MiB and repeated startup failure: "Operator or registry lease remains."
+The immediate restart blocker is now confirmed as a retained lease. The specific
+lock, stopped-owner evidence and memory-heavy process remain unknown. Requested
+one read-only Shell diagnostic that prints only lock path/PID/hostname/mtime and
+running Node process IDs. Do not delete locks or restart financial processes
+without ownership/recovery evidence. Owner reports Shell cannot open during the
+restart loop. Prepared a temporary plain Node HTTP maintenance start command to
+keep the existing disk-backed service reachable for Shell, without loading any
+application signer or changing journals. Independent review accepts this access
+step. Owner applied it; a public read confirmed HTTP 200 with the exact
+maintenance message. The application and payment workers remain stopped. Owner Shell inventory confirms
+only the root `operator-private/operator.lock` remains: PID 94 on the OOM-failed
+instance ending `b8cht`, modified 2026-11-19T20:31:27.998Z. Current maintenance
+instance ends `mp2lm`; PID 94 is absent, and only the maintenance responder and
+the diagnostic Node process appear. No worker or registry lock was reported.
+Independent source review confirms this dead-process mutex is separate from
+durable signed payments and input reservations; recovery reuses retained records
+and malformed records fail closed. Guarded archival of this exact lock is the
+next recovery step, followed by restoration of the original start command. No
+additional manual chain audit is required merely to release this verified dead
+mutex. Abort archival if ownership, timestamp or maintenance-only process checks
+change. No locks or financial records have yet been modified by the agent;
+restored application availability and the memory fix remain unverified. Keep the original start
+command `node products/streak/scripts/direct-host.cjs` for restoration after
+verified lock recovery. The fixture `reconcile` CLI can publish and write events;
+do not treat it as a read-only all-payment audit. Read-only source review identifies child exit,
+readiness timeout and settlement-pass timeout as other supervisor stop paths;
+none establishes the cause of the later failed restarts. Local rollover/JoyID changes remain unpublished and cannot be
+the cause of the current hosted failure. Preserve both unfinished release tasks
+and the owner's separate testing checklist while investigating availability.
+
+19 November JoyID follow-up: the same tester's single v5 pick failed during
+Review payment with a misleading signed-payment uncertainty message. Source
+inspection found the new queue omitted v4's wallet-capability preflight. JoyID
+passkey sign-in is supported, but prediction witnesses remain limited to native
+secp256k1 and EVM. Restore the early payment check, retain saved picks and make
+unsigned offer failures distinct from actual signed submission/recovery failures.
+Do not add or imply JoyID payment support without its separate witness work.
+Focused client/IPC checks, types, lint, build and independent review pass alongside
+the market rollover. No signature format or hosted state was changed. The mobile
+Chromium journey also passes: saved picks survive the unsupported-wallet notice,
+no prepare/offer/sign call occurs, and the supported EVM path still completes
+three signatures plus interrupted-response/reload recovery. No publication or live
+activation yet.
+
+19 November active correction: a community tester cannot pay a slip mixing older
+v4 fixtures with v5 fixtures. Owner requests fresh v5 markets for the older
+upcoming testnet fixtures. Public read-only inventory found 14 scheduled older
+fixtures; all 20 Opening Weekend competition fixtures already use v5. Implement
+an explicit durable new-entry rollover, preserving old registries, signatures,
+Activity and settlement/refunds. Fresh pools require 42,700 tCKB reserves plus
+fees for these 14 fixtures. No live rollover, fund movement or deployment yet.
+The idempotent operator command, consistent entry/pool routing and isolated
+regressions are implemented. Independent recovery review found no remaining
+blocker after fixing the competition-publication race and internal IPC allowlist.
+Focused mobile checkout, operator admission, preservation and pool checks pass.
+The required major gate was attempted and stopped at formatting in the unrelated
+owner-edited hosted acceptance checklist. Preserve that edit; do not count later
+lanes as passed. Static policies, backend/frontend builds and disposable campaign
+PostgreSQL checks pass separately. Full release verification and live activation
+remain outstanding. Earlier launch and payment acceptance
+commitments below remain open; preserve the owner acceptance checklist.
+
+18 November hosted competition launch completed through the authenticated admin UI.
+Streak Five: Opening Weekend is Open for GW11, ID
+campaign-f49a8e2e-54a9-444e-bf17-1cace729a874. At owner direction, replaced the
+initial six-fixture Predictions listing with a 20-fixture edition, ID
+campaign-8b95ec12-1785-4f16-8226-2e73f9d905c7. The old ID
+campaign-430a3956-4178-469f-a3f8-8c8891bf722b was archived through the two-step
+name-confirmation flow with zero registered users; historical records remain.
+Both competitions are Open with matching approved icons/banners, community mode,
+and registration closing 21 November 12:00 Lagos time. Five squad lock is the
+same time. Predictions fixtures span 21-22 November across five leagues.
+
+Owner approved current-price conversion. At the observed CoinGecko price of
+USD 0.0008966 per CKB, each podium is 33,459.73 / 22,306.49 / 11,153.24 CKB,
+rounded down to two decimals, with USD references 30 / 20 / 10. Each competition
+total is 66,919.46 CKB; both total 133,838.92 CKB excluding payout fees. Publication
+does not fund these manual mainnet awards. No fund movement or Render access.
+
+Verified the player page displays "20 fixtures. Make them count." Independent
+unauthenticated API inspection confirmed both Open, exact prizes/artwork/deadlines,
+20 unique approved prediction fixture IDs, zero registrants at verification, and
+only the two current competitions in public discovery. No runtime code change or
+automated tests were needed for this hosted administration.
+
+Launch follow-up: publication can return "Signal timed out" after the generic
+15-second browser request while the server's market reservation allows 60 seconds.
+The server completed successfully. Open the canonical saved competition and
+reconcile its state before retrying; do not create duplicate competitions. UX
+follow-up remains to reconcile lost publication responses and show accurate status.
+Initial provisioning also changed revisions during archive confirmation; refreshing
+and using the normal revision-checked two-step flow succeeded after it stabilized.
+
+18 November hosted administration: at owner request, removed GW10 Five Test and
+GW10 Predictions Test through the signed-in Streak admin two-step delete flow.
+Both returned the archived confirmation; the sidebar shows zero competitions.
+Existing entries, financial records and obligations are retained by soft deletion.
+No Render access, fund movement or source-code deployment was needed.
+
 18 November publication follow-up: owner requested push after the focused results
 and deferred full gate were disclosed. Publish only the regular-market queue
 change; preserve the unrelated hosted acceptance checklist. No further long

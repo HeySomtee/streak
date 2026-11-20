@@ -1,5 +1,10 @@
 # Streak documentation
 
+19 November [fresh markets for earlier payment fixtures](delivery/market-rollover-2026-11-19.md):
+explicit durable v5 entry rollovers, preserved earlier payments and competition
+pins, with an idempotent operator command. Local verification and live activation
+are separate.
+
 18 November [regular new-market signed queue](delivery/regular-market-queue-2026-11-18.md):
 ordinary picks prepare shared v5 genesis and accept independent wallet signatures
 before creation confirms, with expiring unsigned setup and unattended recovery.

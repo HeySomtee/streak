@@ -1,6 +1,7 @@
 import { GenesisPlans, genesisReservedInputs } from './genesis-plans';
 import * as ccc from '@ckb-ccc/core';
 import { queuedFixtureIds } from './queued-fixtures';
+import { readMarketRollovers } from './market-rollover';
 import { orderConfig } from './order-config';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
@@ -52,7 +53,11 @@ export function assertQueuedCreationAvailable(
   journal: OperatorJournal,
   registries: DirectRegistry[],
   protocolHash: string,
+  rollovers: ReadonlySet<string> = new Set(),
 ): void {
+  // Explicit owner-authorized entry routing does not alter earlier records or
+  // their funding reservations. The new generation must fund independent cells.
+  if (rollovers.has(fixtureId)) return;
   const conflict = () => {
     throw Error(
       'This fixture already belongs to an earlier payment flow. Its bets and recovery must be preserved.',
@@ -574,7 +579,7 @@ export async function runOperator(
       registry.get(fixtureId) ??
       queuedCreation?.creations?.find((r) => r.fixtureId === fixtureId) ??
       queuedCreation?.descriptor ??
-      journal.load(operationKey('create', fixtureId))?.descriptor;
+      (queued ? undefined : journal.load(operationKey('create', fixtureId))?.descriptor);
     if (record && record.fixtureId !== fixtureId)
       throw Error('Requested operator record has another fixture');
     const config = queued
@@ -712,7 +717,9 @@ export async function runOperator(
       if (action === 'create') {
         if (
           !queued &&
-          (queuedRegistry?.get(fixtureId) || queuedFixtureIds(journal.directory).has(fixtureId))
+          (queuedRegistry?.get(fixtureId) ||
+            queuedFixtureIds(journal.directory).has(fixtureId) ||
+            readMarketRollovers(queuedRegistry?.directory).has(fixtureId))
         )
           throw Error('This fixture uses queued payments. Preserve its existing market.');
         const fixture = validateScheduledFixture(
@@ -731,6 +738,7 @@ export async function runOperator(
               new DirectRegistry(process.env.STREAK_DIRECT_LEGACY_REGISTRY_DIR),
             ],
             queuedConfig.protocolHash,
+            readMarketRollovers(queuedRegistry?.directory),
           );
         const prepared = await buildCreate(client, signer, fixture, Date.now(), config, available);
         record = prepared.record;

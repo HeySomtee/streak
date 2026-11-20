@@ -1,3 +1,4 @@
+import { readMarketRollovers } from './market-rollover';
 import * as ccc from '@ckb-ccc/core';
 import { orderConfig } from './order-config';
 import { existsSync, readFileSync, readdirSync, renameSync } from 'node:fs';
@@ -180,8 +181,8 @@ export async function runWorkerOnce(stopping: () => boolean = () => false): Prom
         [resolve(directory), resolve(registryDirectory)].includes(resolve(progressDirectory)))
     )
       throw Error('Use a separate absolute public progress directory');
-    // Only administrator-published v5 competition fixtures fund automatically.
-    // Ordinary catalogue browsing never authorizes bulk spending.
+    // Only administrator-published competitions and explicit owner rollovers
+    // fund automatically. Ordinary browsing never authorizes bulk spending.
     const queue =
       catalogueUrl && queuedRegistry
         ? new ProvisionQueue(join(directory, 'provision-v5'), queuedConfig.protocolHash)
@@ -232,6 +233,7 @@ export async function runWorkerOnce(stopping: () => boolean = () => false): Prom
     }
     if (queue && desiredCatalogue) {
       if (queuedRegistry) {
+        const rollovers = readMarketRollovers(queuedRegistry.directory);
         const earlier = new Set(
           [...records.values()]
             .filter((record) => record.type.codeHash !== queuedConfig.protocolHash)
@@ -239,7 +241,9 @@ export async function runWorkerOnce(stopping: () => boolean = () => false): Prom
         );
         desiredCatalogue = {
           ...desiredCatalogue,
-          fixtures: desiredCatalogue.fixtures.filter((fixture) => !earlier.has(fixture.fixtureId)),
+          fixtures: desiredCatalogue.fixtures.filter(
+            (fixture) => !earlier.has(fixture.fixtureId) || rollovers.has(fixture.fixtureId),
+          ),
         };
       }
       queue.synchronize(desiredCatalogue, Date.now());

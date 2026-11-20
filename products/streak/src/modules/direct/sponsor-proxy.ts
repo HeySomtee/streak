@@ -34,7 +34,7 @@ export async function sponsorProxy(
       path,
     ) &&
     !/^\/activity\/(?:events|ack)$/.test(path) &&
-    !/^\/orders\/(?:configuration|wallet|offer|submit|status|cancel-review|reserve-markets|prepare-markets)$/.test(
+    !/^\/orders\/(?:configuration|wallet|offer|submit|status|cancel-review|reserve-markets|reserve-legacy-markets|prepare-markets)$/.test(
       path,
     ) &&
     path !== '/campaign/absence'
@@ -89,11 +89,16 @@ export async function sponsorProxy(
       value && typeof value === 'object' && 'error' in value && typeof value.error === 'string'
         ? value.error
         : '';
+    const unsupportedWallet =
+      ['/orders/offer', '/orders/prepare-markets'].includes(path) &&
+      message ===
+        'This wallet cannot place predictions yet. Your picks are saved. Use MetaMask, Zerion or a supported native CKB wallet. No payment was sent.';
     if (
       message.length <= 240 &&
-      /^(Sponsor is completing|Streak needs additional|Streak is at|Unsigned sponsor offer expired|Invalid owner transaction signature|Fixture terms changed|This fixture already has|Sponsored contract deployment|Sponsor funding is awaiting|Owner needs principal|Owner input must be live|Sponsor queue is busy|This fixture has reached|Use the wallet linked|This proposal belongs|Sponsor request could not complete|Payment review is temporarily unavailable|Atomic payment is awaiting|New predictions use|This fixture has positions|This fixture has no available|This fixture is closed)/.test(
-        message,
-      )
+      (unsupportedWallet ||
+        /^(Sponsor is completing|Streak needs additional|Streak is at|Unsigned sponsor offer expired|Invalid owner transaction signature|Fixture terms changed|This fixture already has|Sponsored contract deployment|Sponsor funding is awaiting|Owner needs principal|Owner input must be live|Sponsor queue is busy|This fixture has reached|Use the wallet linked|This proposal belongs|Sponsor request could not complete|Payment review is temporarily unavailable|Atomic payment is awaiting|New predictions use|This fixture has positions|This fixture has no available|This fixture is closed|These markets now use queued payments|This market now uses queued payments)/.test(
+          message,
+        ))
     )
       throw new SponsorProxyError(
         [403, 409, 429].includes(response.status) ? response.status : 409,

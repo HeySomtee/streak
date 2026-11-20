@@ -1,5 +1,15 @@
 # Quality gates and release procedure
 
+20 November tooling correction: temporary Git fixture tests clear inherited
+repository-local Git environment variables inside their isolated Node processes.
+A real linked-worktree hook regression checks that fixture commits cannot change
+the outer branch, candidate index or shared configuration. The actual release
+hook retains its original candidate and receipt checks.
+The competition browser harness also drains mutation and invalidation requests
+before forced reloads, requiring a fresh 500 ms quiet interval within 15 seconds.
+Cached document lifecycle milestones cannot satisfy that barrier; browser errors
+still fail the journey.
+
 28 October Activity coverage adds canonical four-generation history/reorg tests,
 durable relay replay/corruption tests, authenticated read checks, a disposable
 PostgreSQL event/projection suite, and indexed history plus live-claim browser

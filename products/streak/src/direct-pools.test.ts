@@ -86,6 +86,21 @@ async function main() {
     historical = record();
   assert.equal(activePoolRecord(true, fresh, historical), fresh);
   assert.equal(activePoolRecord(false, undefined, historical), historical);
+  assert.equal(
+    activePoolRecord(true, historical, historical, undefined, true),
+    undefined,
+    'A replacement awaiting creation must not advertise the old pool for new picks.',
+  );
+  assert.equal(
+    activePoolRecord(true, historical, historical, fresh, true),
+    fresh,
+    'Replacement pools have their own principal and never merge old stakes.',
+  );
+  assert.equal(
+    activePoolRecord(true, historical, historical, fresh),
+    fresh,
+    'A confirmed queued market takes precedence over older entry generations.',
+  );
   assert.deepEqual(
     poolPrincipal(market(), cutoff),
     ['10000000000', '20000000000', '30000000000'],

@@ -6,6 +6,7 @@ import * as ccc from '@ckb-ccc/core';
 import type { Match } from './types';
 import {
   PUBLIC_DIRECT_CONFIG,
+  V5_DIRECT_CONFIG,
   LEGACY_DIRECT_CONFIG,
   PROVIDER_ORIGIN,
   createRecord,
@@ -36,6 +37,9 @@ import {
   parseQueuedFixtureIds,
 } from './modules/direct/queued-fixtures';
 import { workerCycle } from './modules/direct/worker';
+import { readMarketRollovers, commitMarketRollovers } from './modules/direct/market-rollover';
+import { OrderMarkets } from './modules/direct/order-markets';
+import { OrderService } from './modules/direct/order-service';
 
 const NOW = 1_800_000_000_000;
 const CKB = 100_000_000n;
@@ -166,6 +170,58 @@ async function main(): Promise<void> {
       /earlier payment flow/,
     );
     assertQueuedCreationAvailable('api-football-2', generationJournal, [oldRegistry], H('a'));
+    const rolloverRegistry = new DirectRegistry(join(directory, 'generation-v5'), V5_DIRECT_CONFIG);
+    commitMarketRollovers(rolloverRegistry.directory!, ['api-football-1']);
+    const marked = readMarketRollovers(rolloverRegistry.directory);
+    assertQueuedCreationAvailable(
+      'api-football-1',
+      generationJournal,
+      [oldRegistry],
+      H('a'),
+      marked,
+    );
+    const untouched = record(catalogue.fixtures[1]);
+    oldRegistry.add(untouched);
+    assert.throws(
+      () =>
+        assertQueuedCreationAvailable(
+          'api-football-2',
+          generationJournal,
+          [oldRegistry],
+          H('a'),
+          marked,
+        ),
+      /earlier payment flow/,
+      'an explicit rollover does not permit unrelated earlier fixtures',
+    );
+    const isolatedClient = new ccc.ClientPublicTestnet({
+      url: 'http://127.0.0.1:1',
+      fallbacks: [],
+    });
+    const markets = new OrderMarkets({
+      client: isolatedClient,
+      signer: new ccc.SignerCkbPrivateKey(isolatedClient, `0x${'04'.repeat(32)}`),
+      journal: generationJournal,
+      registry: rolloverRegistry,
+      earlier: [oldRegistry],
+      config: V5_DIRECT_CONFIG,
+      fixtures: async () => [],
+      now: () => NOW,
+    });
+    assert.deepEqual(markets.legacyFixtureIds(), ['api-football-2']);
+    const config = new OrderService({
+      client: isolatedClient,
+      journal: generationJournal,
+      registry: rolloverRegistry,
+      config: V5_DIRECT_CONFIG,
+      marketPreparation: markets,
+      validateFixture: async () => {},
+      now: () => NOW,
+    }).configuration();
+    assert.deepEqual(config.reservedFixtureIds, ['api-football-1']);
+    assert.deepEqual(config.legacyFixtureIds, ['api-football-2']);
+    assert.deepEqual(oldRegistry.get('api-football-2'), untouched);
+    assert(oldRegistry.get('api-football-1'), 'earlier settlement mapping remains present');
     verifyProvisionFixture(fixture(1), catalogue.fixtures[0]);
     assert.throws(
       () =>
@@ -380,7 +436,18 @@ async function main(): Promise<void> {
       /earlier payment flow/,
       'unpublished signed creation prevents cross-generation reservation',
     );
-    assert.throws(() => assertFreshOperatorInputs(journal, tx), /already belongs/);
+    assertQueuedCreationAvailable(
+      current.fixtureId,
+      journal,
+      [],
+      H('a'),
+      new Set([current.fixtureId]),
+    );
+    assert.throws(
+      () => assertFreshOperatorInputs(journal, tx),
+      /already belongs/,
+      'rollover permission never releases signed operator funding inputs',
+    );
     const unrelated = tx.clone();
     unrelated.inputs[0].previousOutput.txHash = H('a');
     assertFreshOperatorInputs(journal, unrelated);

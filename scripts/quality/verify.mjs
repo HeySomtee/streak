@@ -207,6 +207,11 @@ async function browserChecks() {
     { cwd: product, isolated: true },
   );
   run(
+    'Mixed replacement-market signed checkout',
+    [join(product, 'scripts/order-browser.cjs'), '--rollover'],
+    { cwd: product, isolated: true },
+  );
+  run(
     'Sponsored first prediction browser regression',
     [join(product, 'scripts/sponsored-browser.cjs')],
     { cwd: product, isolated: true },

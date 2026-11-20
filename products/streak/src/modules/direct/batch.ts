@@ -138,6 +138,9 @@ export class BatchService extends SponsorService {
   }
   protected async validateInitial(value: SponsorOffer): Promise<void> {
     const lines = atomicOffer(value).lines;
+    const rollovers = this.rolloverFixtureIds();
+    if (lines.some((line) => rollovers.has(line.fixture.fixtureId)))
+      throw Error('These markets now use queued payments. Review your saved picks again.');
     const fixtures = await this.readFixtures(lines.map((line) => line.fixture.fixtureId));
     for (const [index, line] of lines.entries()) {
       const match = fixtures[index];
@@ -267,10 +270,17 @@ export class BatchService extends SponsorService {
     return this.options.journal.exclusive(async () => {
       const history = this.store.all();
       const prior = history.find((entry) => entry.requestId === request.requestId);
-      if (prior) {
-        if (prior.requestDigest !== digest) throw Error('Request identity belongs to another slip');
-        return atomicOffer(prior.offer);
-      }
+      if (prior && prior.requestDigest !== digest)
+        throw Error('Request identity belongs to another slip');
+      const rollovers = this.rolloverFixtureIds();
+      if (
+        request.picks.some((pick) => rollovers.has(pick.fixtureId)) &&
+        !prior?.userSignedBytes &&
+        !prior?.signedBytes
+      )
+        throw Error('These markets now use queued payments. Review your saved picks again.');
+      // An accepted authorization retains its exact offer and original recovery.
+      if (prior) return atomicOffer(prior.offer);
       const queuedFixtures = queuedFixtureIds(this.options.journal.directory);
       if (request.picks.some((pick) => queuedFixtures?.has(pick.fixtureId)))
         throw Error(

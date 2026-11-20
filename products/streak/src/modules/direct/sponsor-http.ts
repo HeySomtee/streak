@@ -1,9 +1,15 @@
+import { readMarketRollovers, commitLegacyCampaignReservations } from './market-rollover';
 import { OrderMarkets } from './order-markets';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { isAbsolute, resolve } from 'node:path';
 import * as ccc from '@ckb-ccc/core';
-import { SponsorService, parseSponsorRequest, type SponsorSubmitRequest } from './sponsor';
+import {
+  SponsorService,
+  parseSponsorRequest,
+  sponsoredWalletMode,
+  type SponsorSubmitRequest,
+} from './sponsor';
 import { BatchService, parseBatchRequest } from './batch';
 import { sponsorId } from './sponsor-journal';
 import {
@@ -17,7 +23,7 @@ import {
 } from './registry';
 import { OperatorBusyError, OperatorJournal } from './journal';
 import { boundedJson, assertQueuedCreationAvailable } from './cli';
-import { parseQueuedFixtureIds, commitQueuedFixtures } from './queued-fixtures';
+import { parseQueuedFixtureIds, commitQueuedFixtures, queuedFixtureIds } from './queued-fixtures';
 import { provisioningCatalogueUrl } from './provision';
 import { createFixtureReader } from './fixture-reader';
 import { startHostedRecovery } from './hosted-drain';
@@ -111,10 +117,14 @@ export function createSponsorServer(
     active++;
     const startedAt = performance.now();
     let operation = 'unknown';
+    let unsignedOrderReview = false;
     try {
       const url = new URL(req.url ?? '/', 'http://127.0.0.1');
       if (url.pathname.startsWith('/orders/')) {
         operation = 'orders';
+        unsignedOrderReview =
+          req.method === 'POST' &&
+          ['/orders/offer', '/orders/prepare-markets'].includes(url.pathname);
         const orders = options.orders;
         if (url.pathname === '/orders/configuration' && req.method === 'GET')
           return reply(res, 200, orders?.configuration() ?? { enabled: false });
@@ -126,6 +136,27 @@ export function createSponsorServer(
           request = object(payload.request, 'order request');
         // Internal API-to-signer operation only; no public route exposes this.
         // CampaignService verifies administrator access and draft terms first.
+        if (url.pathname === '/orders/reserve-legacy-markets') {
+          const ids = parseQueuedFixtureIds(request.fixtureIds);
+          if (!orders.options.registry.directory)
+            throw Error('Queued-market registry is unavailable');
+          await legacy.options.journal.exclusive(async () => {
+            const queuedIds = queuedFixtureIds(legacy.options.journal.directory);
+            if (
+              ids.some(
+                (id) =>
+                  queuedIds.has(id) ||
+                  orders.options.registry.get(id) ||
+                  orders.options.marketPreparation?.get(id),
+              )
+            )
+              throw Error(
+                'These fixtures already use queued payments. Refresh the competition fixtures before publishing.',
+              );
+            commitLegacyCampaignReservations(orders.options.registry.directory!, ids);
+          });
+          return reply(res, 200, { reserved: ids });
+        }
         if (url.pathname === '/orders/reserve-markets') {
           const ids = parseQueuedFixtureIds(request.fixtureIds);
           await legacy.options.journal.exclusive(async () => {
@@ -143,6 +174,7 @@ export function createSponsorServer(
                   legacy.options.journal,
                   registries,
                   orders.options.config.protocolHash,
+                  readMarketRollovers(orders.options.registry.directory),
                 );
             }
             commitQueuedFixtures(legacy.options.journal.directory, ids);
@@ -152,6 +184,10 @@ export function createSponsorServer(
         if (typeof owner !== 'string' || owner.length > 300)
           throw Error('Authenticated wallet required');
         if (url.pathname === '/orders/prepare-markets') {
+          await sponsoredWalletMode(
+            orders.options.client,
+            (await ccc.Address.fromString(owner, orders.options.client)).script,
+          );
           if (!orders.options.marketPreparation)
             throw Error('On-demand market preparation is unavailable');
           return reply(res, 200, {
@@ -162,6 +198,10 @@ export function createSponsorServer(
         if (url.pathname === '/orders/offer') {
           if (request.ownerAddress !== owner)
             return reply(res, 403, { error: 'Use the wallet linked to the signed-in account.' });
+          await sponsoredWalletMode(
+            orders.options.client,
+            (await ccc.Address.fromString(owner, orders.options.client)).script,
+          );
           return reply(res, 200, await orders.prepare(request));
         }
         const id = sponsorId(request.offerId);
@@ -307,9 +347,17 @@ export function createSponsorServer(
         });
       }
       // Do not return provider payloads, RPC errors, file paths or signing context.
-      const message = error instanceof Error ? error.message : '';
+      const originalMessage = error instanceof Error ? error.message : '';
+      const unsupportedWallet =
+        unsignedOrderReview &&
+        originalMessage ===
+          'Sponsored creation supports native secp or modern OmniLock EVM wallets';
+      const message = unsupportedWallet
+        ? 'This wallet cannot place predictions yet. Your picks are saved. Use MetaMask, Zerion or a supported native CKB wallet. No payment was sent.'
+        : originalMessage;
       const busy = error instanceof OperatorBusyError;
       const safe =
+        unsupportedWallet ||
         (operation === 'orders' &&
           [
             'Three payments from this wallet are already processing. You can keep building your next slip.',
@@ -324,7 +372,7 @@ export function createSponsorServer(
             'This review was cancelled before acceptance. Start a new review.',
             'This signed payment is already accepted and will continue automatically.',
           ].includes(message)) ||
-        /^(Sponsor is completing|Streak needs additional|Streak is at|Unsigned sponsor offer expired|Invalid owner transaction signature|Fixture terms changed|This fixture already has|Sponsored contract deployment|Sponsor funding is awaiting|Owner needs principal|Owner input must be live|This fixture has reached|This fixture has positions|This fixture has no available|This fixture is closed)/.test(
+        /^(Sponsor is completing|Streak needs additional|Streak is at|Unsigned sponsor offer expired|Invalid owner transaction signature|Fixture terms changed|This fixture already has|Sponsored contract deployment|Sponsor funding is awaiting|Owner needs principal|Owner input must be live|This fixture has reached|This fixture has positions|This fixture has no available|This fixture is closed|These markets now use queued payments|This market now uses queued payments)/.test(
           message,
         );
       // Fixed categories only. Never log exception text, request bodies, addresses
@@ -346,7 +394,7 @@ export function createSponsorServer(
                 ? 'Sponsor queue is busy. Your picks and any saved payment are safe. Try again shortly.'
                 : safe
                   ? message
-                  : operation === 'offer'
+                  : operation === 'offer' || unsignedOrderReview
                     ? 'Payment review is temporarily unavailable. No payment was sent by this review. Your picks are saved; try again shortly.'
                     : 'Sponsor request could not complete. Your signed payment may still confirm. Check its saved status before retrying.',
       });

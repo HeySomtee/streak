@@ -40,6 +40,7 @@ export interface OrderConfig {
   markets: OrderMarket[];
   onDemandMarkets?: boolean;
   legacyFixtureIds?: string[];
+  protectedLegacyFixtureIds?: string[];
   plannedFixtureIds?: string[];
   reservedFixtureIds?: string[];
 }

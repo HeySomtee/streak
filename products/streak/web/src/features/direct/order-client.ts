@@ -133,6 +133,12 @@ function saved(value: unknown): SavedOrder {
     throw Error('Saved queued payment is inconsistent.');
   return value as SavedOrder;
 }
+/** Payment capability only; the server still verifies the exact owner lock and signature. */
+export function supportsOrderPayments(signer: {
+  readonly signType: ccc.Signer['signType'];
+}): boolean {
+  return ['CkbSecp256k1', 'EvmPersonal'].includes(signer.signType);
+}
 export class OrderClient {
   constructor(
     readonly signer: ccc.Signer,
@@ -146,6 +152,10 @@ export class OrderClient {
     return (await storedRecords(ORDER_STORE, (await this.identity()).scope)).map(saved);
   }
   async prepare(picks: Pick[], accountId: string): Promise<OrderOffer> {
+    if (!supportsOrderPayments(this.signer))
+      throw Error(
+        'This wallet cannot place predictions yet. Your picks are saved. Use MetaMask, Zerion or a supported native CKB wallet. No payment was sent.',
+      );
     const { owner, scope } = await this.identity(),
       client = this.signer.client;
     for (const [i, dep] of this.config.codeDeps.entries()) {

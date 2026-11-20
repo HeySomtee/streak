@@ -14,6 +14,7 @@ import { buildQueuedCreates, MARKET_RESERVE_SHANNONS } from './operator';
 import { commitQueuedFixtures, parseQueuedFixtureIds } from './queued-fixtures';
 import { sponsorStores } from './sponsor-journal';
 import { GenesisPlans } from './genesis-plans';
+import { readMarketRollovers } from './market-rollover';
 
 /** Shared immutable genesis preparation. Never spends a user's funding input. */
 export class OrderMarkets {
@@ -85,6 +86,7 @@ export class OrderMarkets {
           : [offer.fixture.fixtureId])
           ids.add(id);
       }
+    for (const id of readMarketRollovers(this.options.registry.directory)) ids.delete(id);
     if (ids.size > 512) throw Error('Market routing exceeds its reviewed bound');
     return [...ids];
   }
@@ -102,6 +104,7 @@ export class OrderMarkets {
           this.options.journal,
           this.options.earlier,
           this.options.config.protocolHash,
+          readMarketRollovers(this.options.registry.directory),
         );
       const plans = this.plans(),
         active = plans.active(this.now());

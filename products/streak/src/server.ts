@@ -20,6 +20,7 @@ import { readProvisioningProgress, PROVISION_QUEUE_LIMIT } from './modules/direc
 import { sponsorProxy, SponsorProxyError } from './modules/direct/sponsor-proxy';
 import { orderConfig } from './modules/direct/order-config';
 import { activePoolRecord, PublicPoolCache } from './modules/direct/pools';
+import { readMarketRollovers, readLegacyCampaignReservations } from './modules/direct/market-rollover';
 import { activityService, activityOwner, startActivity, unavailableActivity } from './modules/activity/runtime';
 import { validActivityCursor } from './modules/activity/storage';
 import { catalogueStatusMatches } from './modules/predictions/catalogue';
@@ -1521,8 +1522,14 @@ async function handleOrders(
   if (action === 'configuration') {
     try {
       const result = campaignObject(await sponsorProxy('/orders/configuration'));
-      return sendJson(res, 200, { ...result, plannedFixtureIds: result.enabled ? await queuedCampaignFixtureIds() : [],
-        legacyFixtureIds: [...new Set([...(Array.isArray(result.legacyFixtureIds) ? result.legacyFixtureIds : []), ...(result.enabled ? await legacyCampaignFixtureIds() : [])])] });
+      const protectedLegacyFixtureIds = result.enabled ? [...new Set([...await legacyCampaignFixtureIds(), ...readLegacyCampaignReservations(orderDirectRegistry.directory)])] : [];
+      const rollovers = readMarketRollovers(orderDirectRegistry.directory);
+      return sendJson(res, 200, {
+        ...result,
+        plannedFixtureIds: result.enabled ? [...new Set([...await queuedCampaignFixtureIds(), ...rollovers])] : [],
+        protectedLegacyFixtureIds,
+        legacyFixtureIds: [...new Set([...(Array.isArray(result.legacyFixtureIds) ? result.legacyFixtureIds : []), ...protectedLegacyFixtureIds])],
+      });
     } catch {
       return sendJson(res, 503, { error: 'Payment options could not refresh. Your picks are saved; please retry.' });
     }
@@ -1593,6 +1600,7 @@ async function handleDirectMarkets(res: ServerResponse, url: URL): Promise<void>
     return sendJson(res, 400, { error: 'Invalid fixture identifier.' });
   }
   const status = providerStatus();
+  const rollovers = readMarketRollovers(orderDirectRegistry.directory);
   const markets = await read((db) => {
     const fixtures = provider.scheduleFixtures?.() ?? db.matches;
     const current = directRegistry.describe(fixtures,
@@ -1612,7 +1620,9 @@ async function handleDirectMarkets(res: ServerResponse, url: URL): Promise<void>
     );
     return [
       ...queued,
-      ...atomic,
+      ...atomic.map((row) => rollovers.has(row.fixtureId) || queued.some((m) => m.fixtureId === row.fixtureId)
+        ? { ...row, entryEnabled: false, entryUnavailableReason: 'New picks use the updated market. Existing predictions and returns remain in this original pool.' }
+        : row),
       ...current.map((row) =>
         atomicConfigured
           ? {
@@ -1632,7 +1642,7 @@ async function handleDirectFixtures(res: ServerResponse, queuedOnly = false): Pr
   const fixtures = provider.scheduleFixtures?.();
   if (provider.id !== 'football' || !status.enabled || status.simulated || !coverage || !fixtures)
     return sendJson(res, 503, { error: 'The real football schedule is not ready. Market creation will retry.' });
-  const desired = queuedOnly ? new Set(await queuedCampaignFixtureIds()) : null;
+  const desired = queuedOnly ? new Set([...await queuedCampaignFixtureIds(), ...readMarketRollovers(orderDirectRegistry.directory)]) : null;
   const owned = fixtures.filter(
     (match) => isActiveProviderMatch(match) && match.oracle?.source === PROVIDER_ORIGIN && (!desired || desired.has(match.id)),
   );
@@ -1680,18 +1690,18 @@ const staticRoutes: Record<string, Handler> = {
       ids.some((id) => !/^api-football-[1-9][0-9]{0,14}$/.test(id))
     ) return sendJson(res,400,{error:'Provide up to 24 unique football fixtures.'});
     if (!sponsorRate(`pools:${req.socket.remoteAddress}`,120)) return sendJson(res,429,{error:'Please wait before refreshing pool shares.'});
+    const rollovers = readMarketRollovers(orderDirectRegistry.directory);
     return sendJson(res, 200, {
       pools: ids.map((id) =>
         publicPools.read(
           id,
-          orderDirectRegistry.get(id) ??
-            activePoolRecord(
-              atomicConfigured,
-              atomicConfigured ? batchDirectRegistry.get(id) : undefined,
-              atomicConfigured
-                ? undefined
-                : (directRegistry.get(id) ?? legacyDirectRegistry.get(id)),
-            ),
+          activePoolRecord(
+            atomicConfigured,
+            atomicConfigured ? batchDirectRegistry.get(id) : undefined,
+            atomicConfigured ? undefined : (directRegistry.get(id) ?? legacyDirectRegistry.get(id)),
+            orderDirectRegistry.get(id),
+            rollovers.has(id),
+          ),
         ),
       ),
     });

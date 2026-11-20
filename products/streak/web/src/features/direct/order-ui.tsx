@@ -2,7 +2,13 @@ import { useEffect, useRef, useState, useSyncExternalStore, type ComponentProps 
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BatchCheckout } from './batch-ui';
-import { getOrderConfig, OrderClient, orderWallet, type SavedOrder } from './order-client';
+import {
+  getOrderConfig,
+  OrderClient,
+  orderWallet,
+  supportsOrderPayments,
+  type SavedOrder,
+} from './order-client';
 import type { OrderConfig, OrderOffer, OrderStatus } from '../../../../shared/order-wire';
 import { ORDER_RESERVE, ORDER_STORAGE, decodeOrder } from '../../../../shared/order-codec.mjs';
 import { displayShannons, totalShannons, type Pick } from '../predictions/draft';
@@ -412,6 +418,13 @@ export function OrderCheckout(props: Props & { config: OrderConfig; checkoutEnab
             >
               Reconnect wallet
             </button>
+          ) : !supportsOrderPayments(connection.signer) ? (
+            <Notice title="Choose a wallet for predictions" tone="attention">
+              This wallet can sign in, but its payment format is not supported yet. Use MetaMask,
+              Zerion or a supported native CKB wallet for predictions. Your picks are saved. Switch
+              accounts in <a href="/season/?view=account">My Account</a> to continue. No payment was
+              sent.
+            </Notice>
           ) : visibleReview ? (
             <div className="batch-review">
               <h3>Approve once. We handle the rest.</h3>

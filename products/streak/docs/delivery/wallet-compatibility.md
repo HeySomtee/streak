@@ -1,5 +1,36 @@
 # Wallet compatibility and sign-in recovery
 
+## 19 November: queued-payment JoyID preflight
+
+A tester using JoyID received "Your signed payment may still confirm" when
+reviewing one v5 prediction. Sign-in support does not imply payment support:
+JoyID's passkey lock needs its own reviewed funding-witness implementation.
+The v5 checkout omitted the capability check already present in v4, and the
+operator classified unsigned offer failures as generic order recovery failures.
+This error during review is not evidence that a payment was sent.
+
+The correction rejects unsupported payment signers before preparation and shows
+the existing saved-picks/switch-wallet explanation. Backend preparation and offer
+routes verify the complete supported owner lock before preparing markets or an
+offer. Their errors identify an unpaid review; actual signature submission and
+status failures retain uncertain-payment wording and recovery reservations.
+Native secp256k1 and EVM signature validation are unchanged.
+
+The focused client and real loopback IPC regressions pass: unsupported signers
+make no preparation/signing request, unsupported locks create no offer or genesis,
+unsupported errors remain redacted and signed-status failures retain uncertainty.
+The actual mobile Chromium checkout keeps the draft through the notice, makes
+no prepare/offer/sign request, then continues its supported EVM three-payment
+and interrupted-response/reload recovery journey. Screenshot:
+`.quality-artifacts/order-browser/chromium-390-unsupported-wallet.png`.
+Backend and frontend types, lint, static policies and production build pass.
+Independent review found no blocker. The major gate stopped at formatting in the
+owner's separately edited hosted acceptance checklist; it was preserved. This is
+not a full release pass, publication or hosted acceptance.
+
+This change does not implement JoyID payments, change login compatibility or
+require a new contract deployment. Physical-wallet acceptance remains separate.
+
 ## 6 November: Zerion optional account-picker compatibility
 
 The owner reported "rpc method is not whitelisted" while signing in inside

@@ -1,5 +1,6 @@
 import { genesisReservedInputs } from './genesis-plans';
 import { queuedFixtureIds } from './queued-fixtures';
+import { readMarketRollovers } from './market-rollover';
 import * as ccc from '@ckb-ccc/core';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Match } from '../../types';
@@ -16,6 +17,7 @@ import {
   hash32,
   object,
   LEGACY_DIRECT_CONFIG,
+  V5_DIRECT_CONFIG,
 } from './registry';
 import { OperatorJournal, broadcastOperation, reconcileOperation, operationKey } from './journal';
 import { operatorFundingBarrier, assertFreshOperatorInputs } from './cli';
@@ -348,16 +350,31 @@ export class SponsorService {
         : {}),
     };
   }
+  protected rolloverFixtureIds(): Set<string> {
+    return new Set(
+      [
+        this.options.registry,
+        ...(this.options.existingRegistry ?? []),
+        ...this.options.registry.publicationTargets,
+      ]
+        .filter((registry) => registry.config.protocolHash === V5_DIRECT_CONFIG.protocolHash)
+        .flatMap((registry) => [...readMarketRollovers(registry.directory)]),
+    );
+  }
   async prepareOffer(value: unknown): Promise<SponsorOffer> {
     const request = parseSponsorRequest(value),
       digest = `0x${createHash('sha256').update(JSON.stringify(request)).digest('hex')}`;
     return this.options.journal.exclusive(async () => {
       const prior = this.store.all().find((entry) => entry.requestId === request.requestId);
-      if (prior) {
-        if (prior.requestDigest !== digest)
-          throw Error('Request identity already belongs to another prediction');
-        return prior.offer;
-      }
+      if (prior && prior.requestDigest !== digest)
+        throw Error('Request identity already belongs to another prediction');
+      if (
+        this.rolloverFixtureIds().has(request.fixtureId) &&
+        !prior?.userSignedBytes &&
+        !prior?.signedBytes
+      )
+        throw Error('This market now uses queued payments. Review your saved pick again.');
+      if (prior) return prior.offer;
       if (queuedFixtureIds(this.options.journal.directory).has(request.fixtureId))
         throw Error('This fixture uses signed queued payments. Refresh payment options.');
       this.options.journal.assertAvailableSlot();
@@ -624,6 +641,8 @@ export class SponsorService {
     await this.options.registry.publishCanonical(offer.descriptor, this.options.client);
   }
   protected async validateInitial(offer: SponsorOffer): Promise<void> {
+    if (this.rolloverFixtureIds().has(offer.fixture.fixtureId))
+      throw Error('This market now uses queued payments. Review your saved pick again.');
     const fixture = await this.describe(offer.fixture.fixtureId);
     if (fixture.termsHash !== offer.fixture.termsHash)
       throw Error('Pinned football fixture changed before sponsorship');

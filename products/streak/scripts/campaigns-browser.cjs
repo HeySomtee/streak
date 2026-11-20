@@ -198,47 +198,56 @@ async function main() {
             errors.push(error.message);
             console.error('Browser error at', page.url(), error.stack);
           });
-          // Mutations publish their returned data before their invalidation reads
-          // finish. Let those intercepted responses complete before a test-only
-          // document reload destroys WebKit's request context. Errors remain fatal.
+          // Mutation UI can render before its invalidation requests start. Track
+          // POSTs as well as GETs and require a fresh quiet interval before a
+          // test-only document teardown. A previously reached networkidle load
+          // state is not evidence that these later requests finished.
           const fixtureReads = new Map();
+          let fixtureRevision = 0;
           page.on('request', (request) => {
-            if (request.method() === 'GET' && request.url().startsWith(base + '/api/'))
+            if (request.url().startsWith(base + '/api/')) {
               fixtureReads.set(request, Promise.withResolvers());
+              fixtureRevision++;
+            }
           });
           const finishRead = (request) => {
+            if (!fixtureReads.has(request)) return;
             fixtureReads.get(request)?.resolve();
             fixtureReads.delete(request);
+            fixtureRevision++;
           };
           page.on('requestfinished', finishRead);
           page.on('requestfailed', finishRead);
           async function settleFixtureReads() {
             let timeout;
+            let stopped = false;
             try {
               await Promise.race([
                 (async () => {
-                  while (fixtureReads.size)
+                  while (!stopped) {
                     await Promise.all([...fixtureReads.values()].map((read) => read.promise));
+                    const revision = fixtureRevision;
+                    // Match networkidle's 500 ms interval, measured anew from
+                    // the current activity rather than the document lifecycle.
+                    await new Promise((resolve) => setTimeout(resolve, 500));
+                    if (!fixtureReads.size && fixtureRevision === revision) return;
+                  }
                 })(),
                 new Promise((_, reject) => {
                   timeout = setTimeout(() => reject(Error('Fixture reads did not finish')), 15000);
                 }),
               ]);
             } finally {
+              stopped = true;
               clearTimeout(timeout);
             }
           }
           async function navigate(url) {
             await settleFixtureReads();
-            // React mutation completion can enqueue invalidations after the last
-            // intercepted response finishes. Wait for the browser's network quiet
-            // state before a test-only document teardown; all errors remain fatal.
-            await page.waitForLoadState('networkidle');
             await page.goto(url);
           }
           async function reload() {
             await settleFixtureReads();
-            await page.waitForLoadState('networkidle');
             await page.reload();
           }
           await context.route('**/*', async (route) => {

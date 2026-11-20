@@ -1,5 +1,18 @@
 # Streak status
 
+19 November JoyID review correction is implemented locally: the queued checkout
+now detects unsupported payment wallets before review, and unsigned failures no
+longer imply a signed transaction. JoyID sign-in still works; JoyID prediction
+payments are not implemented. Native/EVM signature rules and saved-payment
+recovery are unchanged. [Compatibility and evidence](docs/delivery/wallet-compatibility.md).
+
+19 November market rollover is implemented locally for explicit upcoming testnet
+fixtures. New entries use fresh v5 pools while earlier accepted payments, Activity
+and settlement remain on their original markets. See the [operation and evidence](docs/delivery/market-rollover-2026-11-19.md).
+Independent review and focused isolated checks pass. The full gate stopped on
+formatting in the separately edited owner acceptance checklist, which remains
+untouched. Publication and hosted activation remain outstanding.
+
 18 November regular new-market queue is implemented locally: two wallets can
 sign independent payments before shared v5 genesis confirms. Focused native-chain,
 synthetic recovery and mobile checkout checks pass, with independent review.

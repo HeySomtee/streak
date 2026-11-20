@@ -1,5 +1,10 @@
 # Architecture and migration
 
+19 November [market entry rollover](../delivery/market-rollover-2026-11-19.md)
+adds explicit durable new-entry selection in the v5 registry. Earlier pools keep
+their settlement and recovery identities. Operator-serialized generation
+reservations prevent rollover from changing a published competition pin.
+
 18 November [regular new-market queue](../delivery/regular-market-queue-2026-11-18.md)
 removes the pre-created-market requirement for ordinary v5 picks. Unsigned durable
 genesis leases bind independent owner orders before setup confirms. Accepted

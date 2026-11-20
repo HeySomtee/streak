@@ -25,8 +25,10 @@ const {
   assertFreshOperatorInputs,
 } = require('../src/modules/direct/cli.ts');
 const { buildCreate } = require('../src/modules/direct/operator.ts');
+const { commitMarketRollovers } = require('../src/modules/direct/market-rollover.ts');
 const {
   DirectRegistry,
+  createRecord,
   V5_DIRECT_CONFIG,
   V4_DIRECT_CONFIG,
 } = require('../src/modules/direct/registry.ts');
@@ -235,6 +237,125 @@ async function main() {
     console.log(
       'PASS exact genesis ancestry recovers and releases pending-chain capacity after confirmation',
     );
+    // An explicit entry rollover preserves the funded old pool and lets its
+    // fixture share a new signed payment with an ordinary uncreated fixture.
+    const rolloverFixture = {
+      ...fixtures[0],
+      id: 'api-football-930001',
+      oracle: { ...fixtures[0].oracle, fixtureId: '930001' },
+    };
+    const freshFixture = {
+      ...fixtures[0],
+      id: 'api-football-930002',
+      oracle: { ...fixtures[0].oracle, fixtureId: '930002' },
+    };
+    const oldBuilt = await buildCreate(client, sponsor, rolloverFixture, now, config);
+    for (const output of oldBuilt.tx.outputs.slice(0, 5)) {
+      output.type.codeHash = V4_DIRECT_CONFIG.protocolHash;
+      output.lock.args = output.type.hash();
+    }
+    chain.commit(oldBuilt.tx);
+    const oldRecord = createRecord(
+      rolloverFixture,
+      {
+        codeHash: V4_DIRECT_CONFIG.protocolHash,
+        hashType: 'data2',
+        args: oldBuilt.record.type.args,
+      },
+      oldBuilt.tx.hash(),
+      V4_DIRECT_CONFIG,
+    );
+    const oldRegistry = new DirectRegistry(path.join(temp, 'rollover-old'), V4_DIRECT_CONFIG);
+    oldRegistry.add(oldRecord);
+    const oldOutputs = [...chain.live.values()].filter(
+      (c) => c.outPoint.txHash === oldRecord.creationTxHash && c.cellOutput.type,
+    );
+    const rolloverJournal = new OperatorJournal(
+      path.join(temp, 'rollover-journal'),
+      undefined,
+      1000,
+    );
+    const rolloverRegistry = new DirectRegistry(path.join(temp, 'rollover-new'), config);
+    const rolloverFixtures = [rolloverFixture, freshFixture];
+    const rolloverPlanner = new OrderMarkets({
+      ...options,
+      journal: rolloverJournal,
+      registry: rolloverRegistry,
+      earlier: [oldRegistry],
+      fixtures: async (ids) => ids.map((id) => rolloverFixtures.find((f) => f.id === id)),
+    });
+    await assert.rejects(
+      rolloverPlanner.prepare(
+        rolloverFixtures.map((f) => f.id),
+        'rollover-owner',
+      ),
+      /earlier payment flow/,
+    );
+    commitMarketRollovers(rolloverRegistry.directory, [rolloverFixture.id]);
+    const mixed = await rolloverPlanner.prepare(
+      rolloverFixtures.map((f) => f.id),
+      'rollover-owner',
+    );
+    assert.equal(mixed.length, 2);
+    assert(mixed.every((m) => m.type.codeHash === config.protocolHash));
+    assert.notEqual(mixed[0].id, oldRecord.id);
+    assert.deepEqual(rolloverPlanner.legacyFixtureIds(), []);
+    const mixedService = new OrderService({
+      client,
+      journal: rolloverJournal,
+      registry: rolloverRegistry,
+      config,
+      marketPreparation: rolloverPlanner,
+      validateFixture: async () => {},
+      now: () => now,
+    });
+    const mixedFund = [...chain.live.values()].find(
+      (c) => c.cellOutput.lock.eq(locks[0]) && !c.cellOutput.type && c.outputData === '0x',
+    );
+    const mixedOffer = await mixedService.prepare({
+      requestId: randomUUID(),
+      ownerAddress: await owners[0].getRecommendedAddress(),
+      userInputs: [{ txHash: mixedFund.outPoint.txHash, index: Number(mixedFund.outPoint.index) }],
+      picks: mixed.map((m) => ({
+        fixtureId: m.fixtureId,
+        termsHash: m.termsHash,
+        outcome: 0,
+        principalShannons: '10000000000',
+      })),
+    });
+    const mixedTx = ccc.Transaction.fromBytes(mixedOffer.unsignedBytes);
+    mixedOffer.inputs.forEach((c, i) => {
+      mixedTx.inputs[i].cellOutput = ccc.CellOutput.from(c.cellOutput);
+      mixedTx.inputs[i].outputData = c.outputData;
+    });
+    assert.equal(
+      (
+        await mixedService.submit(
+          mixedOffer.id,
+          mixedOffer.ownerAddress,
+          (await owners[0].signTransaction(mixedTx)).toHex(),
+        )
+      ).state,
+      'accepted',
+    );
+    for (let i = 0; i < 8; i++) {
+      await mixedService.recoverPending();
+      mine();
+    }
+    assert.equal(mixedService.status(mixedOffer.id, mixedOffer.ownerAddress).state, 'placed');
+    assert.deepEqual(oldRegistry.get(rolloverFixture.id), oldRecord);
+    assert(
+      oldOutputs.every(
+        (c) =>
+          chain.live.get(`${c.outPoint.txHash}:${Number(c.outPoint.index)}`)?.cellOutput.toHex() ===
+          c.cellOutput.toHex(),
+      ),
+      'fresh rollover never spends earlier market control or funds',
+    );
+    console.log(
+      'PASS rolled-over and new fixtures share one signed payment and admission while old pool cells remain untouched',
+    );
+
     const realNow = Date.now;
     let clock = now;
     Date.now = () => clock;

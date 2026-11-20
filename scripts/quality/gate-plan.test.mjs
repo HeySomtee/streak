@@ -14,6 +14,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { changedPaths, planChecks, reusableReceipt } from './gate-plan.mjs';
 import { ROOT, removeTemporaryDirectory } from './repository.mjs';
+import { isolateFixtureGit } from './git-fixture-env.mjs';
+
+isolateFixtureGit();
 
 test('only explicit documentation, CSS and delivery tooling use focused checks', () => {
   assert.deepEqual(planChecks(['products/streak/docs/design/system.md']), ['format', 'static']);

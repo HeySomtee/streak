@@ -413,6 +413,35 @@ async function main() {
           await page.locator('ccc-connector').waitFor({ state: 'detached' });
           assert.equal(page.url(), before, 'Reconnect stays on the current page.');
         }
+        async function savedPayment(hash) {
+          return page.evaluate(
+            (expectedHash) =>
+              new Promise((resolve, reject) => {
+                const request = indexedDB.open('streak-direct-transactions-v1');
+                request.onupgradeneeded = () => {
+                  request.transaction.abort();
+                  reject(Error('The payment recovery database must already exist.'));
+                };
+                request.onerror = () => reject(request.error);
+                request.onsuccess = () => {
+                  const db = request.result;
+                  const read = db.transaction('batch', 'readonly').objectStore('batch').getAll();
+                  read.onerror = () => {
+                    db.close();
+                    reject(read.error);
+                  };
+                  read.onsuccess = () => {
+                    db.close();
+                    const row = read.result.find((value) => value.hash === expectedHash);
+                    resolve(
+                      row && { hash: row.hash, status: row.status, blockHash: row.blockHash },
+                    );
+                  };
+                };
+              }),
+            hash,
+          );
+        }
         async function pay(count, reviewStarted = false) {
           console.log(`Starting payment ${name} ${width} ${count}`);
           const review = page.getByRole('button', {
@@ -727,23 +756,38 @@ async function main() {
             .waitFor();
           await tracker.getByRole('button', { name: 'Dismiss update', exact: true }).click();
           if (count === 2 && name === 'chromium' && width === 1440) {
+            const paymentHash = chain.submissions.at(-1).rawHash;
             reorg = true;
             await tracker
               .getByText('Checking your payment', { exact: true })
               .waitFor({ timeout: 25000 });
             assert.equal(signatures, 2, 'A reorg reopens the tracker without another signature.');
-            reorg = false;
-            await page.waitForFunction(
-              () =>
-                document.querySelector('.payment-progress')?.getAttribute('data-stage') ===
-                'confirmed',
-              null,
-              { timeout: 25000 },
-            );
             assert.equal(
               await page.locator('.payment-progress').count(),
               1,
               'One checkout owns one tracker across changing payment identities.',
+            );
+            assert.equal((await savedPayment(paymentHash)).status, 'unknown');
+            const confirmation = page
+              .locator('dialog.prediction-slip .notice[role="status"]')
+              .filter({ hasText: '2 predictions confirmed on-chain.' });
+            assert.equal(await confirmation.count(), 0, 'A reorg removes the old confirmation.');
+            reorg = false;
+            // The previously dismissed success stays dismissed when it returns.
+            // Current UI retains its receipt in the closed slip instead of a
+            // hidden aside, so verify that receipt and its durable chain result.
+            await confirmation.waitFor({ state: 'attached', timeout: 25000 });
+            assert.equal(await confirmation.count(), 1, 'One reconfirmed receipt is retained.');
+            assert.deepEqual(await savedPayment(paymentHash), {
+              hash: paymentHash,
+              status: 'committed',
+              blockHash: (await chain.rpc('header', [])).hash,
+            });
+            assert.equal(signatures, 2, 'Canonical recovery never asks for a new signature.');
+            assert.equal(
+              chain.submissions.length,
+              2,
+              'Canonical recovery never duplicates payment.',
             );
             await tracker.waitFor({ state: 'hidden' });
           }

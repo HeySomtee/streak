@@ -8,6 +8,7 @@ import { fiveService } from '../five/runtime';
 import { lockTime, TEST_TIMING_POLICY } from '../five/timing';
 import { DirectRegistry, V4_DIRECT_CONFIG } from '../direct/registry';
 import { orderConfig } from '../direct/order-config';
+import { readMarketRollovers } from '../direct/market-rollover';
 import { sponsorProxy } from '../direct/sponsor-proxy';
 import { CampaignError } from './domain';
 import { CampaignService } from './service';
@@ -34,16 +35,19 @@ export async function campaignMarketCommitments() {
   if (commitmentCache && commitmentCache.until > Date.now()) return commitmentCache.rows;
   if (!commitmentRead) {
     campaignService();
-    const revision = commitmentRevision;
-    commitmentRead = storage!
-      .marketCommitments()
-      .then((rows) => {
-        if (revision === commitmentRevision) commitmentCache = { until: Date.now() + 30_000, rows };
-        return rows;
-      })
-      .finally(() => {
-        commitmentRead = undefined;
-      });
+    commitmentRead = (async () => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const revision = commitmentRevision;
+        const rows = await storage!.marketCommitments();
+        if (revision === commitmentRevision) {
+          commitmentCache = { until: Date.now() + 30_000, rows };
+          return rows;
+        }
+      }
+      throw new CampaignError('Competition markets changed. Please refresh.', 503);
+    })().finally(() => {
+      commitmentRead = undefined;
+    });
   }
   return commitmentRead;
 }
@@ -96,6 +100,7 @@ export async function campaignOptions(): Promise<CampaignOptions> {
     new DirectRegistry(process.env.STREAK_DIRECT_LEGACY_REGISTRY_DIR),
   ];
   const commitments = await campaignMarketCommitments();
+  const rollovers = readMarketRollovers(queuedRegistry.directory);
   const fixtures = await read((db) =>
     db.markets.flatMap((market) => {
       const match = db.matches.find((row) => row.id === market.matchId);
@@ -118,7 +123,7 @@ export async function campaignOptions(): Promise<CampaignOptions> {
             match.id,
             queuedRegistry.get(match.id)?.type.codeHash ??
               (queued.codeDeps.length === 2 &&
-              !earlier.some((registry) => registry.get(match.id)) &&
+              (rollovers.has(match.id) || !earlier.some((registry) => registry.get(match.id))) &&
               !commitments.some(
                 (row) =>
                   row.fixtureId === match.id &&
@@ -207,8 +212,28 @@ export function campaignService(): CampaignService {
       five: () => fiveService().campaignStore,
       options: campaignOptions,
       prepareMarkets: async (fixtures) => {
+        const rollovers = readMarketRollovers(process.env.STREAK_ORDER_REGISTRY_DIR);
+        if (
+          fixtures.some(
+            (f) =>
+              rollovers.has(f.fixtureId) &&
+              f.marketKey !== campaignMarketPin(f.fixtureId, orderConfig().protocolHash),
+          )
+        )
+          throw new CampaignError(
+            'A selected market has been updated. Refresh the competition fixtures before publishing.',
+            409,
+          );
+        const queued = orderConfig();
+        const earlier = fixtures
+          .filter((f) => f.marketKey !== campaignMarketPin(f.fixtureId, queued.protocolHash))
+          .map((f) => f.fixtureId);
+        // Reserve the earlier generation under the same operator lease as rollover.
+        // This precedes DB publication and remains conservative if publication fails.
+        if (earlier.length && queued.codeDeps.length === 2)
+          await sponsorProxy('/orders/reserve-legacy-markets', { fixtureIds: earlier });
         const ids = fixtures
-          .filter((f) => f.marketKey === campaignMarketPin(f.fixtureId, orderConfig().protocolHash))
+          .filter((f) => f.marketKey === campaignMarketPin(f.fixtureId, queued.protocolHash))
           .map((f) => f.fixtureId);
         if (ids.length) {
           try {

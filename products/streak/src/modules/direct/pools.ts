@@ -8,7 +8,10 @@ export function activePoolRecord(
   atomic: boolean,
   batch: DirectMarketRecord | undefined,
   historical: DirectMarketRecord | undefined,
+  queued?: DirectMarketRecord,
+  rolledOver = false,
 ) {
+  if (queued || rolledOver) return queued;
   return atomic ? batch : historical;
 }
 export interface PoolPoint {

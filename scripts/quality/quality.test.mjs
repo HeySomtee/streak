@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { isolateFixtureGit } from './git-fixture-env.mjs';
 import {
   ROOT,
   assertCandidate,
@@ -18,6 +20,75 @@ import {
   forbiddenPath,
   secretFindings,
 } from './policies.mjs';
+
+isolateFixtureGit();
+
+test('fixture Git operations cannot inherit a real linked-worktree hook repository', (t) => {
+  const cwd = fixture(t);
+  const original = join(cwd, 'original');
+  const linked = join(cwd, 'linked');
+  const inner = join(cwd, 'inner');
+  const hooks = join(cwd, 'hooks');
+  for (const folder of [original, inner, hooks]) mkdirSync(folder);
+  const git = (directory, ...args) =>
+    execFileSync('git', args, {
+      cwd: directory,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    }).trim();
+  git(original, 'init', '--quiet');
+  git(original, 'config', 'user.name', 'Protected fixture');
+  git(original, 'config', 'user.email', 'protected@example.invalid');
+  writeFileSync(join(original, 'original.txt'), 'original\n');
+  git(original, 'add', '.');
+  git(original, 'commit', '--quiet', '-m', 'original');
+  const originalHead = git(original, 'rev-parse', 'HEAD');
+  git(original, 'worktree', 'add', '--quiet', '--detach', linked, originalHead);
+  git(original, 'config', 'core.hooksPath', hooks.replaceAll('\\', '/'));
+  const configuration = readFileSync(join(original, '.git/config'), 'utf8');
+  const probe = join(cwd, 'probe.mjs');
+  writeFileSync(
+    probe,
+    `import assert from 'node:assert/strict';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+import { isolateFixtureGit } from ${JSON.stringify(pathToFileURL(resolve(ROOT, 'scripts/quality/git-fixture-env.mjs')).href)};
+import { assertCandidate } from ${JSON.stringify(pathToFileURL(resolve(ROOT, 'scripts/quality/repository.mjs')).href)};
+assert.ok(process.env.GIT_DIR, 'real linked-worktree hook must supply repository context');
+assert.ok(process.env.GIT_INDEX_FILE, 'real hook must supply its candidate index');
+isolateFixtureGit();
+const cwd = ${JSON.stringify(inner)};
+const git = (...args) => execFileSync('git', args, {cwd, encoding:'utf8', stdio:['ignore','pipe','pipe']}).trim();
+git('init', '--quiet');
+git('config', 'user.name', 'Inner fixture');
+git('config', 'user.email', 'inner@example.invalid');
+writeFileSync(cwd + '/inner.txt', 'inner\\n');
+git('add', '.');
+assertCandidate(cwd);
+git('commit', '--quiet', '-m', 'inner');
+const child = spawnSync(process.execPath, ['-e', 'const assert=require("node:assert/strict");assert.equal(process.env.GIT_DIR,undefined);assert.equal(process.env.GIT_INDEX_FILE,undefined);'], {cwd, encoding:'utf8'});
+assert.equal(child.status, 0, child.stderr);
+assert.equal(git('rev-parse', '--show-toplevel').replaceAll('\\\\','/'), cwd.replaceAll('\\\\','/'));
+`,
+  );
+  const quote = (value) => `'${value.replaceAll('\\', '/').replaceAll("'", "'\\''")}'`;
+  writeFileSync(
+    join(hooks, 'pre-commit'),
+    `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(probe)}\n`,
+    { mode: 0o755 },
+  );
+  writeFileSync(join(linked, 'original.txt'), 'updated\n');
+  git(linked, 'add', 'original.txt');
+  const candidate = git(linked, 'write-tree');
+  git(linked, 'commit', '--quiet', '-m', 'linked candidate');
+  assert.equal(git(original, 'rev-parse', 'HEAD'), originalHead);
+  assert.equal(readFileSync(join(original, '.git/config'), 'utf8'), configuration);
+  assert.equal(git(linked, 'rev-parse', 'HEAD^'), originalHead);
+  assert.equal(git(linked, 'rev-parse', 'HEAD^{tree}'), candidate);
+  assert.equal(git(linked, 'write-tree'), candidate);
+  assert.equal(git(linked, 'status', '--porcelain'), '');
+});
 
 function fixture(t, prefix = 'streak-policy-') {
   const folder = mkdtempSync(join(tmpdir(), prefix));

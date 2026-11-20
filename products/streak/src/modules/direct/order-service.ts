@@ -32,6 +32,7 @@ import { admissionDrain } from './admission-drain';
 import { orderReservedInputs } from './order-reservations';
 import { readBatch } from './read-batch';
 import { queuedFixtureIds } from './queued-fixtures';
+import { readMarketRollovers } from './market-rollover';
 import type { OrderMarkets } from './order-markets';
 
 const pointKey = (p: ccc.OutPointLike) => ccc.OutPoint.from(p).toHex();
@@ -92,7 +93,12 @@ export class OrderService {
       reserveShannons: ORDER_RESERVE.toString(),
       maxExecutionFeeShannons: ORDER_MAX_FEE.toString(),
       maxPendingPerWallet: 3,
-      reservedFixtureIds: [...queuedFixtureIds(this.options.journal.directory)],
+      reservedFixtureIds: [
+        ...new Set([
+          ...queuedFixtureIds(this.options.journal.directory),
+          ...readMarketRollovers(this.options.registry.directory),
+        ]),
+      ],
       markets: this.options.registry
         .all()
         .filter((m) => m.cutoffMs > this.now() + 120_000)
