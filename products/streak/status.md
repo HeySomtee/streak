@@ -8,7 +8,10 @@ checks. At 06:42 UTC the public frontend bundles matched the verified build
 byte-for-byte and the new backend configuration responded. The owner then applied
 the 14-fixture rollover successfully. At 06:47 UTC all 14 were absent from legacy
 routing and present in the reserved/planned v5 lists. Fresh market registration
-was still pending for all 14; the command itself did not broadcast.
+was still pending for all 14; the command itself did not broadcast. By 07:13 UTC
+3 pools were registered, then the operator lacked a sufficiently large funding
+cell. The owner's subsequent 100,000 tCKB top-up was verified canonical and live
+at 07:19 UTC. Remaining registrations and wallet review still need verification.
 Earlier accepted bets retain their original markets and settlement. JoyID sign-in
 remains supported; JoyID prediction payments are not implemented. The separate
 memory incident and physical-wallet acceptance remain open.

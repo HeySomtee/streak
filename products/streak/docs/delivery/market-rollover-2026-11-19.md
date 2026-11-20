@@ -75,6 +75,16 @@ Independent public review at 06:48 UTC found all 14 original markets still in
 activation and retained original-market visibility, not completed fresh-pool
 deployment or a hosted claim. The worker still has to register the fresh pools;
 physical-wallet mixed-slip and earlier-claim acceptance remain outstanding.
+
+By 07:13 UTC three replacement pools were registered. A reported review failure
+was traced to operator funding: complete public pagination showed only
+4,304.09637176 tCKB in plain cells, with none large enough for a fresh pool.
+The builder currently requires a single funding cell. The owner supplied
+100,000 tCKB; at 07:19 UTC its output 0 was live and canonical with nine
+confirmations in transaction
+`0x10a8ee9574c4602027b4e82ac098f709f1c1c786318b4b5f159268011c66d2d2`.
+At 07:21 UTC the registry still listed three replacement pools. Funding is
+verified; subsequent worker completion and wallet acceptance are separate.
 The earlier attempts below are historical local evidence.
 
 Focused isolated tests cover rollover commitments, both publication race orders,

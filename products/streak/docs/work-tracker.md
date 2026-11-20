@@ -1,5 +1,30 @@
 # Streak work tracker
 
+20 November follow-up: owner supplied a five-pick Review payment screenshot
+reporting insufficient capacity to prepare fresh markets. Public configuration
+at 07:13 UTC showed 3 of the 14 replacement pools registered, with 11 remaining.
+Public CKB reads at 07:14 UTC found 1,996 operator-lock cells across the complete
+indexer pagination. Only 14 were plain CKB cells, totalling 4,304.09637176 tCKB;
+the largest held 2,399.99948372 tCKB. This is public cell capacity, not a claim
+that private reservations permit spending it. No single cell could cover even
+one new pool's 3,050 tCKB reserve plus 61 tCKB change and 1 tCKB fee allowance.
+The remaining 11 pools require 33,550 tCKB of reserves plus change and fees.
+Independent source review confirms this error occurs before the user's payment
+offer or signature and that the current builder cannot combine funding cells.
+The existing post-grant aggregation commitment remains open. The immediate
+remedy is a fresh operator funding cell; recommend 50,000 testnet CKB in one
+transfer to cover the remaining reserves with headroom. The destination was
+derived from matching change locks in all three new public genesis transactions.
+The owner then transferred 100,000 tCKB. At 07:19 UTC public chain reads verified
+transaction `0x10a8ee9574c4602027b4e82ac098f709f1c1c786318b4b5f159268011c66d2d2`
+as committed in its canonical block with 9 confirmations and a live 100,000 tCKB
+plain output at index 0 under the verified operator lock. This clears the
+observed funding-cell shortage. At 07:21 UTC registry completion remained 3/14;
+fresh-market completion and a real-wallet review still require verification.
+Public provisioning progress is not exposed on this host. No private reservation
+access or fund movement was performed by the agent. Keep signed journals and
+earlier pools intact. The memory task remains open.
+
 20 November owner authorized completing verification, publication, deployment and
 fresh-market activation for slip compatibility. Use an isolated release worktree
 to preserve the separately edited hosted acceptance checklist. Recheck current
