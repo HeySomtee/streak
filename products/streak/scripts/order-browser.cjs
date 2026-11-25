@@ -52,12 +52,14 @@ async function main() {
  const fixture=window.fixture;configureOrderManifest(fixture.config);
  const store=new DraftStore(localStorage);window.connectTest=connect;window.checkoutDraft=()=>store.getSnapshot().draft;
  const qc=new QueryClient({defaultOptions:{queries:{retry:false}}});
- function App(){const [busy,setBusy]=useState(false),[target,setTarget]=useState(null),[,refreshCapability]=useState(0);
+ function App(){const [busy,setBusy]=useState(false),[target,setTarget]=useState(null),[feedback,setFeedback]=useState(null),[mount,setMount]=useState(0),[active,setActive]=useState(true),[,refreshCapability]=useState(0);
+ window.remountCheckout=()=>setMount(n=>n+1);
+ window.setSlipActive=setActive;
  window.setTestSignType=(signType)=>{Object.defineProperty(getWalletState().connection.signer,'signType',{value:signType,configurable:true});refreshCapability(n=>n+1);};
  return <main style={{maxWidth:600,margin:'auto',padding:20}}><h1>Queued predictions</h1>
  <button className="quiet" disabled={busy} onClick={()=>{for(const id of fixture.fixtureIds)store.select('market-'+id,id,'home')}}>Add next pick</button>
- <${demand ? 'PaymentCheckout' : 'OrderCheckout'} store={store} account={{id:'order-browser-user',username:'Test manager',walletAddress:fixture.address}} accountReady={true} onSignIn={()=>{}} signInPending={false} active={true} onBusy={setBusy} activityTarget={target} config={fixture.config}/>
- <section aria-label="Saved payments" ref={setTarget}/></main>}
+ <${demand ? 'PaymentCheckout' : 'OrderCheckout'} key={mount} store={store} account={{id:'order-browser-user',username:'Test manager',walletAddress:fixture.address}} accountReady={true} onSignIn={()=>{}} signInPending={false} active={active} onBusy={setBusy} activityTarget={target} feedbackTarget={feedback} config={fixture.config}/>
+ <section aria-label="Payment feedback" ref={setFeedback}/><section aria-label="Saved payments" ref={setTarget}/></main>}
  createRoot(document.getElementById('root')).render(<QueryClientProvider client={qc}><App/></QueryClientProvider>);
  `,
   );
@@ -225,6 +227,9 @@ async function main() {
           commitMarketRollovers(registry.directory, [fixture.fixtureId]);
           assert(!marketPreparation.legacyFixtureIds().includes(fixture.fixtureId));
         }
+        let clock = Date.now();
+        // Every clock read advances, exposing a split createdAt/expiresAt sample.
+        const advancingNow = () => (clock = Math.max(Date.now(), clock + 1));
         let service = new OrderService({
             client,
             journal,
@@ -232,11 +237,13 @@ async function main() {
             config,
             validateFixture: async () => {},
             marketPreparation,
+            now: advancingNow,
           }),
           signatures = 0,
           paymentPreparations = 0,
           paymentOffers = 0,
-          loseResponse = false;
+          loseResponse = false,
+          walletProjection = null;
         const context = await browser.newContext({
             viewport: { width, height: 900 },
             reducedMotion: 'reduce',
@@ -290,11 +297,12 @@ async function main() {
                 };
                 break;
               case '/api/direct/orders/wallet':
-                value = await service.wallet(chain.address);
+                value = walletProjection ?? (await service.wallet(chain.address));
                 break;
               case '/api/direct/orders/offer':
                 paymentOffers++;
                 value = await service.prepare(body);
+                assert.equal(value.expiresAt - value.createdAt, 120_000);
                 break;
               case '/api/direct/orders/submit':
                 value = await service.submit(body.offerId, chain.address, body.userSignedBytes);
@@ -464,6 +472,7 @@ async function main() {
           registry,
           config,
           validateFixture: async () => {},
+          now: advancingNow,
         });
         page = await context.newPage();
         page.on('pageerror', (e) => errors.push(e.message));
@@ -472,6 +481,55 @@ async function main() {
           () => document.querySelectorAll('.order-history article').length === 3,
         );
         assert.equal(signatures, 3, 'Restoring accepted history must not sign');
+        // Synthetic read projection only. No placement or confirmation is claimed
+        // for the transactions in this signing/acceptance fixture.
+        walletProjection = structuredClone(await service.wallet(chain.address));
+        for (const order of walletProjection.orders) {
+          order.state = 'placed';
+          order.offer.createdAt -= 3 * 24 * 60 * 60 * 1000;
+          order.offer.expiresAt -= 3 * 24 * 60 * 60 * 1000;
+        }
+        await page.reload();
+        const confirmation = page.getByRole('status').filter({ hasText: 'Payment confirmed.' });
+        await confirmation.waitFor();
+        await page.getByRole('button', { name: 'Dismiss payment confirmation' }).click();
+        await confirmation.waitFor({ state: 'hidden' });
+        await page.evaluate(() => window.remountCheckout());
+        await page.waitForFunction(
+          () => document.querySelectorAll('.order-history article').length === 3,
+        );
+        assert.equal(
+          await confirmation.count(),
+          0,
+          'Dismissed success stays hidden after route remount',
+        );
+        await page.reload();
+        await page.waitForFunction(
+          () => document.querySelectorAll('.order-history article').length === 3,
+        );
+        assert.equal(
+          await confirmation.count(),
+          0,
+          'Days-old dismissed success stays hidden on return',
+        );
+        await connect();
+        assert.equal(await confirmation.count(), 0, 'Wallet restoration does not reset dismissal');
+        walletProjection.orders[0].state = 'attention';
+        await page.reload();
+        await page.waitForFunction(() => typeof window.setSlipActive === 'function');
+        await page.evaluate(() => window.setSlipActive(false));
+        const pendingTracker = page.locator('.payment-progress[data-stage="queued"]:not([hidden])');
+        await pendingTracker.waitFor();
+        assert.equal(
+          await pendingTracker.getByRole('button', { name: 'Dismiss update' }).count(),
+          0,
+        );
+        walletProjection.orders[0].state = 'placed';
+        walletProjection.orders[0].offer.id = require('node:crypto').randomUUID();
+        await page.reload();
+        await confirmation.waitFor();
+        assert.equal(signatures, 3, 'Notification dismissal and restoration never sign');
+        walletProjection = null;
         assert.deepEqual(errors, []);
         assert.deepEqual(external, []);
         console.log(

@@ -772,12 +772,20 @@ async function main() {
               .locator('dialog.prediction-slip .notice[role="status"]')
               .filter({ hasText: '2 predictions confirmed on-chain.' });
             assert.equal(await confirmation.count(), 0, 'A reorg removes the old confirmation.');
+            await tracker.locator('.payment-progress-toggle').click();
+            await tracker
+              .getByRole('button', { name: 'Open prediction slip', exact: true })
+              .click();
             reorg = false;
             // The previously dismissed success stays dismissed when it returns.
-            // Current UI retains its receipt in the closed slip instead of a
-            // hidden aside, so verify that receipt and its durable chain result.
-            await confirmation.waitFor({ state: 'attached', timeout: 25000 });
-            assert.equal(await confirmation.count(), 1, 'One reconfirmed receipt is retained.');
+            // Recovery must update the durable receipt without replaying an
+            // acknowledged notification, including the inline slip notice.
+            const recoveryDeadline = Date.now() + 25000;
+            while (
+              (await savedPayment(paymentHash))?.status !== 'committed' &&
+              Date.now() < recoveryDeadline
+            )
+              await new Promise((resolve) => setTimeout(resolve, 100));
             assert.deepEqual(await savedPayment(paymentHash), {
               hash: paymentHash,
               status: 'committed',
@@ -789,6 +797,15 @@ async function main() {
               2,
               'Canonical recovery never duplicates payment.',
             );
+            await tracker.waitFor({ state: 'hidden' });
+            assert.equal(await confirmation.count(), 0, 'Dismissed confirmation stays absent.');
+            await page.getByRole('tab', { name: 'Activity', exact: true }).click();
+            const receipt = page.locator('.slip-receipt').filter({ hasText: '2 predictions' });
+            if ((await receipt.getAttribute('open')) === null)
+              await receipt.locator('summary').click();
+            await receipt.locator(`a[href$="/transaction/${paymentHash}"]`).waitFor();
+            await receipt.getByText('Confirmed', { exact: true }).waitFor();
+            await page.getByRole('button', { name: 'Close prediction slip', exact: true }).click();
             await tracker.waitFor({ state: 'hidden' });
           }
         }

@@ -23,6 +23,7 @@ import { PaymentProgress, PaymentButtonState, type PaymentPresentation } from '.
 import { Notice } from '../../components/notice';
 import { useNow } from '../../lib/use-now';
 import './order-ui.css';
+import { usePaymentDismissal } from './use-payment-dismissal';
 type Props = ComponentProps<typeof BatchCheckout>;
 const money = (n: string | bigint) => `${displayShannons(n)} tCKB`;
 const terminal = (s: OrderStatus) =>
@@ -148,7 +149,6 @@ export function OrderCheckout(props: Props & { config: OrderConfig; checkoutEnab
     identity: string;
   } | null>(null);
   const [step, setStep] = useState('Preparing your payment');
-  const [dismissedProgress, setDismissedProgress] = useState('');
   const queryClient = useQueryClient(),
     now = useNow(active);
   const client = connection ? new OrderClient(connection.signer, config) : null;
@@ -243,22 +243,20 @@ export function OrderCheckout(props: Props & { config: OrderConfig; checkoutEnab
   const progressKey = progressOrder?.offer.id;
   const progressCreatedAt = progressOrder?.offer.createdAt ?? 0;
   const hasPending = pending.length > 0;
-  const presentationToken = `${identity}:${progressKey}:${progressOrder?.state}`;
+  const { dismissed: progressDismissed, dismiss: dismissProgress } = usePaymentDismissal(
+    account?.id ?? 'guest',
+    `order:${progressKey ?? ''}`,
+    progressOrder?.state ?? '',
+    hasPending,
+  );
   const { onProgress } = props;
   useEffect(() => {
     onProgress?.(
-      progressKey && dismissedProgress !== presentationToken
+      progressKey && !progressDismissed
         ? { key: progressKey, pending: hasPending, createdAt: progressCreatedAt }
         : null,
     );
-  }, [
-    onProgress,
-    progressKey,
-    hasPending,
-    progressCreatedAt,
-    dismissedProgress,
-    presentationToken,
-  ]);
+  }, [onProgress, progressKey, hasPending, progressCreatedAt, progressDismissed]);
   useEffect(() => () => onProgress?.(null), [onProgress]);
   const unsent = (local.data ?? []).filter(
     (r) =>
@@ -338,7 +336,7 @@ export function OrderCheckout(props: Props & { config: OrderConfig; checkoutEnab
       {props.activityTarget && createPortal(records, props.activityTarget)}
       {orders.length > 0 && (
         <PaymentProgress
-          suppressed={props.progressVisible === false}
+          suppressed={props.progressVisible === false || progressDismissed}
           inlineTarget={props.feedbackTarget}
           stage={
             pending.length ? 'queued' : orders[0]?.state === 'placed' ? 'confirmed' : 'resolved'
@@ -347,9 +345,9 @@ export function OrderCheckout(props: Props & { config: OrderConfig; checkoutEnab
             pending.reduce((n, s) => n + s.offer.markets.length, 0) ||
             orders[0].offer.markets.length
           }
-          hidden={active || dismissedProgress === presentationToken}
-          onDismiss={() => setDismissedProgress(presentationToken)}
-          operationKey={orders.map((s) => s.offer.id).join(':')}
+          hidden={active}
+          onDismiss={dismissProgress}
+          operationKey={progressKey ?? ''}
           terminal={!pending.length}
           onOpen={() => {
             props.onOpen?.();

@@ -1,5 +1,120 @@
 # Streak work tracker
 
+25 November release exception: the owner explicitly requested "skip remaining
+checks" after focused payment, campaign HTTP, Five and Survivor browser coverage
+and independent review passed. The latest full run was stopped during competition
+browser coverage at that request. It is incomplete, not a full-suite pass.
+Publication to HeySomtee/streak uses a per-command commit/push hook bypass for
+this release only. Production deployment must be verified separately.
+
+25 November release-gate correction: the full run passed the previously timed-out
+Five lane and all six competition browser journeys, then failed Survivor's
+30-round assertion. Its rolling synthetic fixture times split one December 31
+round across calendar years, making that test round incomplete. Test fixtures
+now start at midnight UTC two days ahead, keeping all ten matches on one day;
+the original UI and persisted 30-round assertions remain. The UI assertion also
+waits up to ten seconds for rendering. No Survivor application rules changed.
+The focused Survivor rerun passed all six Chromium/WebKit cases. Independent review approved the test correction. The later owner release exception above supersedes the remaining gate requirement for this release.
+
+25 November owner requests rehearsal competitions hidden from participant
+discovery and publication of the overdue success-modal fix. Confirmed the active
+source repository is HeySomtee/streak, with the release worktree attached to that
+repository. Added service-level discovery filtering for guests and non-admin
+accounts, covering all consumers of the competition list. Admin discovery and
+existing direct-link/history access remain available. No competition records,
+entries, rewards or settlement state are deleted. HTTP coverage verifies guest,
+participant and admin results. The previous full gate timed out in Five browser
+coverage; a focused rerun and the required full release gate remain in progress.
+The focused Five rerun passed all six Chromium/WebKit viewport cases. A fresh
+independent source review found no release-blocking issue in dismissal, recovery
+or rehearsal discovery. The isolated campaign HTTP regression also passed.
+
+25 November handoff: owner reports both competitions finalized and requests a
+group reminder for winners to save mainnet receiving addresses. Draft provided
+in chat only; no message sent and no campaign or payout state changed. The
+notification publication retry remains uncommitted: its full gate timed out in
+Five named standings/pitch/refund browser coverage after Chromium 320 passed.
+No hook was bypassed and nothing was pushed. Resume by diagnosing that timeout,
+then complete the required gate and publish the notification fix. The corrected
+checkout browser regression separately passed all six browser/viewport journeys.
+
+24 November publication follow-up: owner requested push. The required commit
+hook passed static/build, unit, PostgreSQL and initial browser lanes, then stopped
+at an obsolete checkout assertion expecting a dismissed inline success notice
+to reappear after recovery. Updated that scenario to require persistent dismissal
+and a confirmed Activity receipt, retaining canonical block/hash, signature and
+submission-count assertions. Independent review approved the correction. Full
+gate completion and publication remain pending; no hook bypass is authorized.
+
+24 November payment-notification dismissal: owner reports successful payments
+reopening days later after dismissal, especially on competition pages. Traced
+queued checkout to component-local dismissal keyed by wallet revision; history
+reload/remount recreates the confirmation. Implemented account/payment/status
+scoped presentation preferences shared by queued and atomic checkouts, with
+persistent terminal dismissal and ephemeral per-attempt review/error dismissal.
+Pending monitoring, signed journals and Activity receipts remain independent.
+Three new preference unit tests, strict frontend TypeScript, lint, production
+build and independent review passed. The final isolated queued-payment browser
+run passed Chromium and WebKit at 390 and 1440px, covering dismissal, remount,
+reload, wallet reconnect, pending recovery and a fresh receipt. It also uses an
+advancing clock to verify a separately found offer-timestamp race correction:
+creation and expiry now share one timestamp, retaining the market-cutoff cap.
+The complete gate was started, corrected initial formatting, and passed static,
+build and the completed backend/payment/concurrency suites before it was
+intentionally stopped during hosted-drain regression to finish focused checks.
+It is incomplete, not a release pass; full gate completion remains required
+before normal publication. No commit, push, deployment, public payment or live
+account change was performed. The implementation and notes are mirrored into
+the Streak source checkout; the owner's unrelated checklist is untouched.
+
+24 November receiving-address follow-up: public reads confirm the remaining
+participant already has the finalized third-place Prediction award with status
+address-needed, so that competition's existing address form is available on
+sign-in. Five still ranks him fourth with no award and provisional scores; its
+address form requires a finalized winning award. Owner wants him able to submit
+receiving addresses for both after test-wallet exclusion. Exclusions and award
+reallocation have not been implemented or applied. Preserve any receiving address
+already saved when correcting the unpaid Prediction allocation; retain Five's
+published correction window and final evidence requirements.
+
+24 November prize eligibility review: owner supplied six unique test wallets
+(one repeated) and requested counts with those excluded. Public campaign and
+Five squad reads at 11:09 UTC matched three test entries in each competition
+using published shortened wallet labels. One qualifying non-test wallet remains
+in Predictions (21 points) and Five (9 points), belonging to the same participant:
+one unique tester and two first-place positions after exclusion. Another
+non-test prediction registration has no qualifying entries and is not counted
+as a prize winner. Five remains provisional until its correction/finalization
+gates complete. This was a read-only calculation; existing finalized Prediction
+awards still include test entries and have not been reallocated or paid. Full
+wallet identity verification and an explicit award correction remain necessary
+before payout. No public report was published or private wallet list committed.
+
+24 November Five completion diagnosis: at 10:45 UTC the public Opening Weekend
+Five campaign remained live with four registered, active entries and provisional
+scores. The underlying fpl-2026-11 round had complete scores, no pending standings
+entries and healthy automation last synced at 10:40 UTC. Its published
+finalizeAfter is 25 November 02:00 UTC (03:00 Lagos), the existing 30-hour score
+correction window after the last fixture kickoff. Automatic round finalization
+still requires official finished/data_checked flags and a fresh complete score
+observation after that window. Once round evidence becomes final, the campaign
+moves to Finalizing; the existing admin Review final standings action is required
+to finish it and publish winners. The Live label obscures this waiting stage.
+No code, campaign state, deadlines or prizes were changed. Independent source
+review confirmed these gates. This diagnosis does not close the separate memory
+reliability or hosted wallet acceptance commitments.
+
+20 November participation follow-up: owner clarified that few people are joining
+the competitions. At 19:00 UTC the public campaign list reported three registered
+for Predictions and two for Five, with registration closing 21 November 11:00
+UTC (12:00 Lagos). No outreach was sent or campaign rules/prizes changed. Advice
+focuses on direct invitations, clear supported-wallet guidance and helping the
+first participants complete entry. These counts alone do not establish traffic
+or the cause of conversion loss. The same public check now lists all 14 target
+replacement markets in the v5 registry, with none remaining unregistered. This
+completes the outstanding registry observation after the owner's top-up; hosted
+wallet acceptance and the separate memory-reliability task remain open.
+
 20 November follow-up: owner supplied a five-pick Review payment screenshot
 reporting insufficient capacity to prepare fresh markets. Public configuration
 at 07:13 UTC showed 3 of the 14 replacement pools registered, with 11 remaining.

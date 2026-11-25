@@ -1,5 +1,9 @@
 # Streak documentation
 
+24 November [payment notification dismissal](delivery/payment-notification-dismissal.md):
+persisted terminal notification preferences across reloads and wallet restoration,
+with pending recovery and receipts retained independently.
+
 19 November [fresh markets for earlier payment fixtures](delivery/market-rollover-2026-11-19.md):
 explicit durable v5 entry rollovers, preserved earlier payments and competition
 pins, with an idempotent operator command. Local verification and live activation

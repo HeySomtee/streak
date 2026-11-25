@@ -383,13 +383,14 @@ export class OrderService {
         throw Error(
           'Insufficient unreserved CKB for the picks, refundable queue reserve, network fee and wallet change.',
         );
+      const createdAt = this.now();
       const offer: OrderOffer = {
         version: 'queued-predictions-v1',
         id: request.requestId,
         ownerAddress: request.ownerAddress,
         ownerLock: { codeHash: owner.codeHash, hashType: owner.hashType, args: owner.args },
-        createdAt: this.now(),
-        expiresAt: Math.min(this.now() + 120_000, data.expiry - 120_000),
+        createdAt,
+        expiresAt: Math.min(createdAt + 120_000, data.expiry - 120_000),
         rawHash: tx.hash(),
         unsignedBytes: tx.toHex(),
         inputs: inputs.map((i) => copyCell(i.cell)),

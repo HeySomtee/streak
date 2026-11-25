@@ -85,9 +85,12 @@ async function main() {
           });
           const store = new MemoryStore(),
             now = Date.now();
+          // Keep all ten fixtures in each synthetic round on the same UTC day.
+          // A rolling time-of-day can split a December 31 round across years.
+          const fixtureStart = Math.floor(now / 86400000) * 86400000 + 2 * 86400000;
           const fixtures = Array.from({ length: 10 }, (_, i) => ({
             id: `fixture-${i}`,
-            kickoff: new Date(now + 86400000 + i * 3600000).toISOString(),
+            kickoff: new Date(fixtureStart + i * 3600000).toISOString(),
             status: 'scheduled',
             competition: { id: '39' },
             oracle: { provider: 'api-football' },
@@ -196,6 +199,11 @@ async function main() {
           let dialog = page.getByRole('dialog');
           await dialog.getByLabel('Competition name').fill('Disposable draft');
           await dialog.getByLabel('Number of rounds', { exact: true }).fill('30');
+          await page.waitForFunction(
+            () => document.querySelectorAll('dialog input[name="round"]:checked').length === 30,
+            undefined,
+            { timeout: 10000 },
+          );
           assert.equal(await dialog.locator('input[name="round"]:checked').count(), 30);
           await dialog.getByRole('button', { name: 'Save draft' }).click();
           await page.getByRole('region', { name: 'Set up Disposable draft' }).waitFor();

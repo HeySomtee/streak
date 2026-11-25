@@ -63,11 +63,16 @@ export class CampaignService {
   }
   async list(actor: CampaignActor): Promise<CampaignPage> {
     const [records, now] = await Promise.all([this.store.list(), this.store.clock()]);
+    const admin = this.isAdmin(actor);
     return {
-      admin: this.isAdmin(actor),
+      admin,
       viewerId: actor?.id ?? null,
       now: new Date(now).toISOString(),
-      campaigns: records.filter((c) => this.visible(c, actor)).map((c) => summary(c, actor, now)),
+      // Rehearsals are admin-discoverable. Existing direct links and participant
+      // history retain their normal access rules without advertising test runs.
+      campaigns: records
+        .filter((c) => this.visible(c, actor) && (admin || !c.draft.rehearsal))
+        .map((c) => summary(c, actor, now)),
       detail: null,
     };
   }

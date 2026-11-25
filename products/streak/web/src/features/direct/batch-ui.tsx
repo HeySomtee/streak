@@ -27,6 +27,7 @@ import {
   paymentIsPending,
 } from './payment-progress';
 import { waitForReviewRetry } from './review-wait';
+import { usePaymentDismissal } from './use-payment-dismissal';
 
 const money = (value: string | bigint) => `${displayShannons(value)} tCKB`;
 const explorer = (hash: string) => `https://pudge.explorer.nervos.org/transaction/${hash}`;
@@ -331,12 +332,10 @@ export function BatchCheckout({
   const identityRef = useRef(identityKey);
   identityRef.current = identityKey;
   const [saved, setSaved] = useState<{ record: BatchRecord; identityKey: string } | null>(null);
-  const [dismissedHash, setDismissedHash] = useState('');
   const [walletStep, setWalletStep] = useState<'preparing' | 'wallet' | 'saving'>('preparing');
   useEffect(() => {
     setSaved(null);
     setReceipt(null);
-    setDismissedHash('');
   }, [identityKey]);
   const reviewHeading = useRef<HTMLHeadingElement>(null);
   const reviewController = useRef<AbortController | null>(null);
@@ -440,7 +439,6 @@ export function BatchCheckout({
       submit.reset();
       setSaved(null);
       setReceipt(null);
-      setDismissedHash('');
       queryClient.setQueryData(['direct-private', identityKey, 'batch-background-history'], null);
     },
     mutationFn: async (input: { stamp: string; identityKey: string }) => {
@@ -732,11 +730,17 @@ export function BatchCheckout({
               ? 'not-sent'
               : null;
   const progressKey = currentRecord?.hash ?? identityKey;
-  const presentationToken = `${progressKey}:${stage}`;
+  const { dismissed: progressDismissed, dismiss: dismissProgress } = usePaymentDismissal(
+    account?.id ?? 'guest',
+    `batch:${currentRecord?.hash ?? `${identityKey}:${prepare.submittedAt}`}`,
+    stage ?? '',
+    !!stage && paymentIsPending(stage, terminal),
+    !!currentRecord && terminal,
+  );
   const progressCreatedAt = currentRecord?.createdAt ?? prepare.submittedAt;
   useEffect(() => {
     onProgress?.(
-      stage && dismissedHash !== presentationToken
+      stage && !progressDismissed
         ? {
             key: progressKey,
             pending: paymentIsPending(stage, terminal),
@@ -744,15 +748,7 @@ export function BatchCheckout({
           }
         : null,
     );
-  }, [
-    onProgress,
-    stage,
-    progressKey,
-    progressCreatedAt,
-    terminal,
-    dismissedHash,
-    presentationToken,
-  ]);
+  }, [onProgress, stage, progressKey, progressCreatedAt, terminal, progressDismissed]);
   useEffect(() => () => onProgress?.(null), [onProgress]);
   return (
     <section className="batch-checkout" aria-label="Slip payment" hidden={!checkoutEnabled}>
@@ -812,15 +808,15 @@ export function BatchCheckout({
         )}
       {stage && onOpen && (
         <PaymentProgress
-          suppressed={!progressVisible}
+          suppressed={!progressVisible || progressDismissed}
           inlineTarget={feedbackTarget}
           operationKey={currentRecord?.hash ?? identityKey}
           stage={stage}
           terminal={terminal}
           count={currentRecord?.offer.lines.length ?? snapshot.draft.picks.length}
-          hidden={active || dismissedHash === presentationToken}
+          hidden={active}
           onOpen={onOpen}
-          onDismiss={() => setDismissedHash(presentationToken)}
+          onDismiss={dismissProgress}
         >
           {currentRecord && linked.data ? (
             <BatchTransaction

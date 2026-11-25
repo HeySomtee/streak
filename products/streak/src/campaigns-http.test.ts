@@ -532,7 +532,22 @@ async function main() {
       200,
       'replacement/removal preserves immutable URLs',
     );
-    assert.equal((await page(await get())).campaigns[0].rehearsal, true);
+    const community = structuredClone(store.rows.get('http-campaign')!);
+    community.id = 'http-community';
+    community.draft.rehearsal = false;
+    store.rows.set(community.id, community);
+    for (const cookie of [undefined, cookies[1]])
+      assert.deepEqual(
+        (await page(await get('', cookie))).campaigns.map((c) => c.id),
+        ['http-community'],
+        'public discovery includes real competitions and hides published rehearsals',
+      );
+    assert.deepEqual(
+      (await page(await get('', cookies[0]))).campaigns.map((c) => c.id).sort(),
+      ['http-campaign', 'http-community'],
+      'administrators retain rehearsal discovery',
+    );
+    store.rows.delete(community.id);
     assert.equal(
       (await post({ action: 'join', id: 'http-campaign', termsHash: 'wrong' }, cookies[1])).status,
       409,
@@ -552,6 +567,7 @@ async function main() {
     );
     assert.equal(joined.detail!.own!.rank, 1, 'registration creates a ranked zero-point entry');
     assert.equal(joined.detail!.own!.points, 0);
+    assert.equal(joined.campaigns.length, 0, 'joining a rehearsal does not add it to discovery');
     assert.equal(
       store.rows.get('http-campaign')!.entries[0].accountId,
       'http-user-1',

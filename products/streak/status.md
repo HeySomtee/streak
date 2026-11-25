@@ -1,5 +1,28 @@
 # Streak status
 
+25 November release exception: the owner explicitly requested "skip remaining
+checks" after focused payment, campaign HTTP, Five and Survivor browser coverage
+and independent review passed. The latest full run was stopped during competition
+browser coverage at that request. It is incomplete, not a full-suite pass.
+Publication to HeySomtee/streak uses a per-command commit/push hook bypass for
+this release only. Production deployment must be verified separately.
+
+25 November rehearsal discovery is filtered for guests and non-admin accounts.
+Administrators retain access, and existing detail/history links keep their normal
+rules. No records or payments are deleted. The isolated campaign HTTP regression
+passed. This change and the notification dismissal fix below await the required
+full gate and push to HeySomtee/streak; production is not yet updated.
+
+24 November payment-notification dismissal is implemented locally. Dismissed
+terminal confirmations persist per account/payment/result across route remounts,
+reloads and wallet restoration. Pending progress remains visible and receipts
+remain in Activity. A browser regression also exposed and prompted a correction
+to split offer creation/expiry clock reads. Independent review passed; local
+unit, type/lint/build and focused Chromium/WebKit checks passed. The full gate
+was interrupted after completed payment/concurrency suites and is not a release
+pass. Not published or deployed. See the
+[delivery record](docs/delivery/payment-notification-dismissal.md).
+
 20 November market-slip compatibility and JoyID preflight are published as [ed0d46e](https://github.com/HeySomtee/streak/commit/ed0d46eaaf5a4425c6137585766bdd488eba55b6).
 All 110 local release stages passed in one complete run at 06:37 UTC on Node
 24.14.0. Commit and push reused the exact-tree receipt. The two browser harness
